@@ -3,7 +3,7 @@ import { useApp } from "../../lib/store";
 import { Card, CardContent } from "../../components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "../../components/ui/table";
 import { Tabs, TabsList, TabsTrigger } from "../../components/ui/tabs";
-import { Sheet, SheetContent, SheetHeader, SheetTitle } from "../../components/ui/sheet";
+import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "../../components/ui/sheet";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "../../components/ui/collapsible";
 import { Button } from "../../components/ui/button";
 import { StatusBadge } from "../../components/StatusBadge";
@@ -33,7 +33,7 @@ export default function AdminEvents() {
         </div>
         <Tabs value={filter} onValueChange={setFilter}>
           <TabsList>
-            {FILTERS.map((f) => <TabsTrigger key={f} value={f} className="capitalize">{f === "sandbox_bank" ? "Sandbox" : f}</TabsTrigger>)}
+            {FILTERS.map((f) => <TabsTrigger key={f} value={f} className="capitalize">{f === "sandbox_bank" ? "Mock provider" : f}</TabsTrigger>)}
           </TabsList>
         </Tabs>
       </div>
@@ -72,7 +72,10 @@ export default function AdminEvents() {
         <SheetContent className="w-[500px] sm:max-w-md overflow-y-auto">
           {selected && (
             <>
-              <SheetHeader><SheetTitle className="font-mono">{selected.id}</SheetTitle></SheetHeader>
+              <SheetHeader>
+                <SheetTitle className="font-mono">{selected.id}</SheetTitle>
+                <SheetDescription>Provider event details</SheetDescription>
+              </SheetHeader>
               <div className="mt-4 space-y-3 text-sm">
                 <Row k="Provider" v={<StatusBadge status={selected.provider} />} />
                 <Row k="Event type" v={selected.eventType} />

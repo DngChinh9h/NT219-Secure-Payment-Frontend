@@ -1,11 +1,13 @@
-import { useEffect } from "react";
 import { Link, NavLink, Outlet, useNavigate } from "react-router";
 import { Logo } from "../components/Logo";
 import { useApp } from "../lib/store";
 import { Button } from "../components/ui/button";
 import {
+  DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger,
+} from "../components/ui/dropdown-menu";
+import {
   LayoutDashboard, ShoppingBag, Receipt, CreditCard, RotateCcw, Webhook,
-  ShieldCheck, FileSearch, Settings, ArrowLeft, Bell,
+  ShieldCheck, FileSearch, ChevronDown, LogOut,
 } from "lucide-react";
 
 const NAV = [
@@ -17,15 +19,13 @@ const NAV = [
   { to: "/admin/events", label: "Provider Events", icon: Webhook },
   { to: "/admin/security", label: "Security Operations", icon: ShieldCheck },
   { to: "/admin/audit", label: "Audit Trail", icon: FileSearch },
-  { to: "/admin/settings", label: "Settings", icon: Settings },
 ];
 
 export default function AdminLayout() {
   const navigate = useNavigate();
-  const { user, loginAsAdmin } = useApp();
-  useEffect(() => {
-    if (!user || user.role !== "admin") loginAsAdmin();
-  }, [user, loginAsAdmin]);
+  const { user, logout } = useApp();
+  const name = user?.fullName ?? "Admin";
+  const email = user?.email ?? "admin@securepay.io";
 
   return (
     <div className="min-h-screen bg-slate-100 text-slate-900">
@@ -44,11 +44,6 @@ export default function AdminLayout() {
             </NavLink>
           ))}
         </nav>
-        <div className="border-t border-slate-200 p-3">
-          <Button variant="ghost" size="sm" className="w-full justify-start gap-2" onClick={() => navigate("/shop")}>
-            <ArrowLeft className="h-4 w-4" /> Back to shop
-          </Button>
-        </div>
       </aside>
       <div className="lg:pl-60">
         <header className="sticky top-0 z-20 flex h-16 items-center justify-between border-b border-slate-200 bg-white/85 px-4 backdrop-blur sm:px-6">
@@ -57,14 +52,27 @@ export default function AdminLayout() {
             <div className="text-sm font-medium text-slate-800">SecurePay Operations Console</div>
           </div>
           <div className="flex items-center gap-3">
-            <Button variant="ghost" size="icon"><Bell className="h-4 w-4" /></Button>
-            <div className="flex items-center gap-2 rounded-full border border-slate-200 bg-white py-1 pl-1 pr-3">
-              <div className="grid h-7 w-7 place-items-center rounded-full bg-indigo-100 text-xs font-medium text-indigo-700">A</div>
-              <div className="text-sm">
-                <div className="leading-none">Admin</div>
-                <div className="text-[11px] text-slate-500">admin@securepay.io</div>
-              </div>
-            </div>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="ghost" size="sm" className="gap-2">
+                  <div className="grid h-7 w-7 place-items-center rounded-full bg-indigo-100 text-indigo-700 text-xs font-medium">
+                    {name.slice(0, 1).toUpperCase()}
+                  </div>
+                  <div className="hidden text-left sm:block">
+                    <div className="text-sm leading-none">{name}</div>
+                    <div className="text-[11px] text-slate-500">{email}</div>
+                  </div>
+                  <ChevronDown className="h-4 w-4" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                <DropdownMenuLabel>{email}</DropdownMenuLabel>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem onClick={() => { logout(); navigate("/login"); }}>
+                  <LogOut className="mr-2 h-4 w-4" /> Log out
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
           </div>
         </header>
         <main className="p-4 sm:p-6 lg:p-8"><Outlet /></main>

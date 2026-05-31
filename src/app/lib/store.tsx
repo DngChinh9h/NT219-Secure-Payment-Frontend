@@ -15,6 +15,7 @@ import type {
   Product,
   ProviderEvent,
   Receipt,
+  RefundRequest,
   Transaction,
   User,
 } from "./types";
@@ -29,6 +30,7 @@ interface AppState {
   receipts: Receipt[];
   providerEvents: ProviderEvent[];
   auditLogs: AuditLog[];
+  refundRequests: RefundRequest[];
 
   login: (email: string, password: string) => User;
   loginAsAdmin: () => void;
@@ -45,6 +47,11 @@ interface AppState {
   simulatePayment: (orderId: string, result: "approve" | "decline" | "pending") => { order: Order; transaction: Transaction; receipt?: Receipt };
   requestRefund: (transactionId: string, reason: string) => Transaction;
   syncPayment: (orderId: string) => { before: OrderStatus; after: OrderStatus; duplicatePrevented: boolean };
+
+  submitRefundRequest: (input: { orderId: string; reason: string; details?: string }) => RefundRequest;
+  cancelRefundRequest: (id: string) => void;
+  approveRefundRequest: (id: string) => void;
+  rejectRefundRequest: (id: string, rejectionReason: string, internalNote?: string) => void;
 }
 
 const AppContext = createContext<AppState | null>(null);
@@ -58,6 +65,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [receipts, setReceipts] = useState<Receipt[]>(SEED_RECEIPTS);
   const [providerEvents, setProviderEvents] = useState<ProviderEvent[]>(SEED_PROVIDER_EVENTS);
   const [auditLogs, setAuditLogs] = useState<AuditLog[]>(SEED_AUDIT_LOGS);
+  const [refundRequests, setRefundRequests] = useState<RefundRequest[]>([]);
 
   const login: AppState["login"] = useCallback((email) => {
     const u: User = { email, fullName: email.split("@")[0], role: "customer" };
@@ -230,15 +238,101 @@ export function AppProvider({ children }: { children: ReactNode }) {
     return { before, after, duplicatePrevented: true };
   }, [orders, pushAudit]);
 
+  const submitRefundRequest: AppState["submitRefundRequest"] = useCallback(({ orderId, reason, details }) => {
+    const order = orders.find((o) => o.id === orderId);
+    if (!order) throw new Error("Order not found");
+    const at = new Date().toISOString();
+    const req: RefundRequest = {
+      id: "rfr_" + uid(),
+      orderId,
+      transactionId: order.transactionId,
+      customerEmail: order.customerEmail,
+      amount: order.amount,
+      reason,
+      details,
+      status: "pending_review",
+      submittedAt: at,
+      updatedAt: at,
+    };
+    setRefundRequests((all) => [req, ...all]);
+    pushAudit("refund.requested", req.id);
+    return req;
+  }, [orders, pushAudit]);
+
+  const cancelRefundRequest: AppState["cancelRefundRequest"] = useCallback((id) => {
+    const at = new Date().toISOString();
+    setRefundRequests((all) =>
+      all.map((r) => (r.id === id && r.status === "pending_review" ? { ...r, status: "cancelled", updatedAt: at } : r)),
+    );
+    pushAudit("refund.cancelled", id);
+  }, [pushAudit]);
+
+  const approveRefundRequest: AppState["approveRefundRequest"] = useCallback((id) => {
+    const at = new Date().toISOString();
+    let snapshot: RefundRequest | null = null;
+    setRefundRequests((all) =>
+      all.map((r) => {
+        if (r.id !== id) return r;
+        snapshot = { ...r, status: "approved_processing", updatedAt: at, reviewedAt: at, reviewedBy: user?.email ?? "admin" };
+        return snapshot;
+      }),
+    );
+    pushAudit("refund.approved", id);
+    setTimeout(() => {
+      const completedAt = new Date().toISOString();
+      let completed: RefundRequest | null = null;
+      setRefundRequests((all) =>
+        all.map((r) => {
+          if (r.id !== id) return r;
+          completed = { ...r, status: "refunded", updatedAt: completedAt, refundedAt: completedAt, refundTxnRef: "rf_" + uid() };
+          return completed;
+        }),
+      );
+      if (snapshot?.transactionId) {
+        setTransactions((ts) =>
+          ts.map((t) =>
+            t.id === snapshot!.transactionId
+              ? { ...t, status: "refunded", refundStatus: "processed", refundedAt: completedAt, refundReason: snapshot!.reason }
+              : t,
+          ),
+        );
+      }
+      if (snapshot) {
+        setOrders((os) =>
+          os.map((o) =>
+            o.id === snapshot!.orderId
+              ? { ...o, status: "refunded", updatedAt: completedAt, timeline: [...o.timeline, { label: "Refunded", at: completedAt, done: true }] }
+              : o,
+          ),
+        );
+      }
+      pushAudit("refund.completed", id);
+    }, 1200);
+  }, [pushAudit, user]);
+
+  const rejectRefundRequest: AppState["rejectRefundRequest"] = useCallback((id, rejectionReason, internalNote) => {
+    const at = new Date().toISOString();
+    setRefundRequests((all) =>
+      all.map((r) =>
+        r.id === id
+          ? { ...r, status: "rejected", updatedAt: at, reviewedAt: at, reviewedBy: user?.email ?? "admin", rejectionReason, internalNote }
+          : r,
+      ),
+    );
+    pushAudit("refund.rejected", id);
+  }, [pushAudit, user]);
+
   const value = useMemo<AppState>(() => ({
-    user, cart, products, orders, transactions, receipts, providerEvents, auditLogs,
+    user, cart, products, orders, transactions, receipts, providerEvents, auditLogs, refundRequests,
     login, loginAsAdmin, register, logout,
     addToCart, updateCartQty, removeFromCart, clearCart,
     createOrderFromCart, setOrderProvider, simulatePayment, requestRefund, syncPayment,
-  }), [user, cart, products, orders, transactions, receipts, providerEvents, auditLogs,
+    submitRefundRequest, cancelRefundRequest, approveRefundRequest, rejectRefundRequest,
+  }), [user, cart, products, orders, transactions, receipts, providerEvents, auditLogs, refundRequests,
     login, loginAsAdmin, register, logout,
     addToCart, updateCartQty, removeFromCart, clearCart,
-    createOrderFromCart, setOrderProvider, simulatePayment, requestRefund, syncPayment]);
+    createOrderFromCart, setOrderProvider, simulatePayment, requestRefund, syncPayment,
+    submitRefundRequest, cancelRefundRequest, approveRefundRequest, rejectRefundRequest]);
 
   return <AppContext.Provider value={value}>{children}</AppContext.Provider>;
 }

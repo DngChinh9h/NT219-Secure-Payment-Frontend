@@ -36,7 +36,7 @@ export default function CartPage() {
         <Card className="border-dashed border-slate-300 bg-white">
           <CardContent className="flex flex-col items-center gap-3 p-12 text-center text-slate-500">
             <div className="text-lg font-medium text-slate-700">Your cart is empty</div>
-            <div className="text-sm">Browse products and add your first item.</div>
+            <div className="text-sm">Your cart is empty. Start shopping to add products.</div>
             <Button className="mt-2 bg-indigo-600 hover:bg-indigo-700" onClick={() => navigate("/shop")}>Continue shopping</Button>
           </CardContent>
         </Card>

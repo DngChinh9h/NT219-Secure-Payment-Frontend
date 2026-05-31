@@ -58,9 +58,9 @@ export default function AdminOverview() {
                 <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
                 <XAxis dataKey="d" stroke="#94a3b8" />
                 <YAxis stroke="#94a3b8" />
-                <Tooltip />
-                <Line type="monotone" dataKey="paid" stroke="#4f46e5" strokeWidth={2} dot={false} />
-                <Line type="monotone" dataKey="failed" stroke="#f43f5e" strokeWidth={2} dot={false} />
+                <Tooltip cursor={false} />
+                <Line key="paid" type="monotone" dataKey="paid" stroke="#4f46e5" strokeWidth={2} dot={false} isAnimationActive={false} />
+                <Line key="failed" type="monotone" dataKey="failed" stroke="#f43f5e" strokeWidth={2} dot={false} isAnimationActive={false} />
               </LineChart>
             </ResponsiveContainer>
           </CardContent>
@@ -70,10 +70,10 @@ export default function AdminOverview() {
           <CardContent>
             <ResponsiveContainer width="100%" height={260}>
               <PieChart>
-                <Pie data={distribution} dataKey="value" nameKey="name" innerRadius={40} outerRadius={70} paddingAngle={2}>
+                <Pie data={distribution} dataKey="value" nameKey="name" innerRadius={40} outerRadius={70} paddingAngle={2} isAnimationActive={false}>
                   {distribution.map((d) => <Cell key={d.name} fill={d.color} />)}
                 </Pie>
-                <Tooltip /><Legend />
+                <Tooltip cursor={false} /><Legend />
               </PieChart>
             </ResponsiveContainer>
           </CardContent>
@@ -87,8 +87,8 @@ export default function AdminOverview() {
             <ResponsiveContainer width="100%" height={200}>
               <BarChart data={providers}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
-                <XAxis dataKey="name" stroke="#94a3b8" /><YAxis stroke="#94a3b8" /><Tooltip />
-                <Bar dataKey="value" fill="#4f46e5" radius={[6, 6, 0, 0]} />
+                <XAxis dataKey="name" stroke="#94a3b8" /><YAxis stroke="#94a3b8" /><Tooltip cursor={false} />
+                <Bar dataKey="value" fill="#4f46e5" radius={[6, 6, 0, 0]} isAnimationActive={false} />
               </BarChart>
             </ResponsiveContainer>
           </CardContent>

@@ -3,7 +3,7 @@ import { useApp } from "../../lib/store";
 import { Card, CardContent } from "../../components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "../../components/ui/table";
 import { Tabs, TabsList, TabsTrigger } from "../../components/ui/tabs";
-import { Sheet, SheetContent, SheetHeader, SheetTitle } from "../../components/ui/sheet";
+import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "../../components/ui/sheet";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "../../components/ui/collapsible";
 import { Button } from "../../components/ui/button";
 import { StatusBadge } from "../../components/StatusBadge";
@@ -75,7 +75,10 @@ export default function AuditTrail() {
         <SheetContent className="w-[460px] sm:max-w-md overflow-y-auto">
           {selected && (
             <>
-              <SheetHeader><SheetTitle className="font-mono">{selected.id}</SheetTitle></SheetHeader>
+              <SheetHeader>
+                <SheetTitle className="font-mono">{selected.id}</SheetTitle>
+                <SheetDescription>Audit log entry</SheetDescription>
+              </SheetHeader>
               <div className="mt-4 space-y-3 text-sm">
                 <Row k="Event" v={selected.event} />
                 <Row k="Actor" v={selected.actor} />

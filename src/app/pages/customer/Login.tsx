@@ -13,7 +13,7 @@ export default function LoginPage() {
   const [email, setEmail] = useState("linh.nguyen@example.com");
   const [password, setPassword] = useState("••••••••");
   const navigate = useNavigate();
-  const { login } = useApp();
+  const { login, loginAsAdmin } = useApp();
 
   const submit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -62,6 +62,13 @@ export default function LoginPage() {
               New to SecurePay?{" "}
               <Link to="/register" className="font-medium text-indigo-600 hover:underline">Create your account</Link>
             </div>
+            <div className="flex items-center gap-2 text-xs text-slate-500">
+              <div className="h-px flex-1 bg-slate-200" /><span>or</span><div className="h-px flex-1 bg-slate-200" />
+            </div>
+            <Button type="button" variant="outline" className="w-full"
+              onClick={() => { loginAsAdmin(); toast.success("Signed in as operator"); navigate("/admin"); }}>
+              Sign in as operator
+            </Button>
             <div className="rounded-md border border-slate-200 bg-slate-50 p-3 text-xs text-slate-500">
               Your personal information is protected and used only for order and payment verification.
             </div>

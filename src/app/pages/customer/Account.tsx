@@ -15,6 +15,8 @@ export default function AccountPage() {
     address: user?.address ?? "",
     citizenId: user?.citizenId ?? "",
   });
+  const [showPwd, setShowPwd] = useState(false);
+  const [pwd, setPwd] = useState({ current: "", next: "", confirm: "" });
 
   if (!user) {
     return <div className="rounded-xl border border-slate-200 bg-white p-10 text-center text-slate-500">Please sign in to view your account.</div>;
@@ -44,8 +46,42 @@ export default function AccountPage() {
               <ShieldCheck className="mt-0.5 h-4 w-4" />
               <div>Your personal information is protected and used only for order and payment verification.</div>
             </div>
-            <Button variant="outline" className="w-full">Change password</Button>
-            <Button variant="outline" className="w-full">Manage devices</Button>
+            {!showPwd ? (
+              <Button variant="outline" className="w-full" onClick={() => setShowPwd(true)}>Change password</Button>
+            ) : (
+              <div className="space-y-3 rounded-md border border-slate-200 p-3">
+                <div className="space-y-1.5">
+                  <Label htmlFor="pwd-current" className="text-xs text-slate-600">Current password</Label>
+                  <Input id="pwd-current" type="password" autoComplete="current-password"
+                    value={pwd.current} onChange={(e) => setPwd({ ...pwd, current: e.target.value })} />
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor="pwd-new" className="text-xs text-slate-600">New password</Label>
+                  <Input id="pwd-new" type="password" autoComplete="new-password"
+                    value={pwd.next} onChange={(e) => setPwd({ ...pwd, next: e.target.value })} />
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor="pwd-confirm" className="text-xs text-slate-600">Confirm new password</Label>
+                  <Input id="pwd-confirm" type="password" autoComplete="new-password"
+                    value={pwd.confirm} onChange={(e) => setPwd({ ...pwd, confirm: e.target.value })} />
+                </div>
+                <div className="flex gap-2 pt-1">
+                  <Button variant="outline" className="flex-1" onClick={() => { setShowPwd(false); setPwd({ current: "", next: "", confirm: "" }); }}>Cancel</Button>
+                  <Button className="flex-1 bg-indigo-600 hover:bg-indigo-700"
+                    onClick={() => {
+                      if (!pwd.current || !pwd.next || !pwd.confirm) { toast.error("Please fill in all fields."); return; }
+                      if (pwd.next.length < 8) { toast.error("New password must be at least 8 characters."); return; }
+                      if (pwd.next !== pwd.confirm) { toast.error("New password and confirmation do not match."); return; }
+                      if (pwd.next === pwd.current) { toast.error("New password must differ from current."); return; }
+                      toast.success("Password updated.");
+                      setShowPwd(false);
+                      setPwd({ current: "", next: "", confirm: "" });
+                    }}>
+                    Update password
+                  </Button>
+                </div>
+              </div>
+            )}
           </CardContent>
         </Card>
       </div>

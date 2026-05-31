@@ -4,7 +4,7 @@ import { Card, CardContent } from "../../components/ui/card";
 import { Input } from "../../components/ui/input";
 import { Button } from "../../components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "../../components/ui/table";
-import { Sheet, SheetContent, SheetHeader, SheetTitle } from "../../components/ui/sheet";
+import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "../../components/ui/sheet";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../../components/ui/select";
 import { StatusBadge } from "../../components/StatusBadge";
 import { formatDate, formatVND, shortId } from "../../lib/format";
@@ -86,7 +86,10 @@ export default function AdminOrders() {
         <SheetContent className="w-[520px] sm:max-w-md overflow-y-auto">
           {selected && (
             <>
-              <SheetHeader><SheetTitle className="font-mono">{shortId(selected.id, "#")}</SheetTitle></SheetHeader>
+              <SheetHeader>
+                <SheetTitle className="font-mono">{shortId(selected.id, "#")}</SheetTitle>
+                <SheetDescription>Order details</SheetDescription>
+              </SheetHeader>
               <div className="mt-4 space-y-4 text-sm">
                 <div className="rounded-md bg-slate-50 p-3">
                   <div className="text-xs uppercase tracking-wider text-slate-500">Customer</div>

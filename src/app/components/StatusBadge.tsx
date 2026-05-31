@@ -19,6 +19,12 @@ const TONE: Record<string, string> = {
   broken: "bg-rose-100 text-rose-700 border-rose-200",
   refunded: "bg-violet-100 text-violet-700 border-violet-200",
   duplicate: "bg-violet-100 text-violet-700 border-violet-200",
+  pending_review: "bg-amber-100 text-amber-700 border-amber-200",
+  approved_processing: "bg-blue-100 text-blue-700 border-blue-200",
+  rejected: "bg-rose-100 text-rose-700 border-rose-200",
+  provider_failed: "bg-orange-100 text-orange-700 border-orange-200",
+  cancelled: "bg-slate-100 text-slate-600 border-slate-200",
+  payment_failed: "bg-rose-100 text-rose-700 border-rose-200",
   created: "bg-slate-100 text-slate-700 border-slate-200",
   issued: "bg-slate-100 text-slate-700 border-slate-200",
   none: "bg-slate-100 text-slate-600 border-slate-200",
@@ -32,6 +38,13 @@ const LABEL: Record<string, string> = {
   sandbox_bank: "Sandbox Bank",
   stripe: "Stripe",
   none: "No refund",
+  failed: "Payment failed",
+  payment_failed: "Payment failed",
+  pending_review: "Pending review",
+  approved_processing: "Approved · processing",
+  provider_failed: "Provider failed",
+  cancelled: "Cancelled",
+  rejected: "Rejected",
 };
 
 export function StatusBadge({ status, className, children }: { status: string; className?: string; children?: React.ReactNode }) {

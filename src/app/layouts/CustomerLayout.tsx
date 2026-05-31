@@ -4,14 +4,13 @@ import { useApp } from "../lib/store";
 import { Button } from "../components/ui/button";
 import { Badge } from "../components/ui/badge";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "../components/ui/dropdown-menu";
-import { ShoppingCart, User as UserIcon, ShieldCheck, LogOut, ChevronDown } from "lucide-react";
+import { ShoppingCart, User as UserIcon, LogOut, ChevronDown } from "lucide-react";
 
 const NAV = [
   { to: "/shop", label: "Home" },
   { to: "/cart", label: "Cart" },
   { to: "/orders", label: "My Orders" },
-  { to: "/transactions", label: "Transactions" },
-  { to: "/receipts", label: "Receipts" },
+  { to: "/refund-requests", label: "Refund Requests" },
   { to: "/account", label: "Account" },
 ];
 
@@ -45,9 +44,6 @@ export default function CustomerLayout() {
               {cartCount > 0 && (
                 <Badge className="ml-2 h-5 min-w-5 rounded-full bg-indigo-600 px-1.5 text-[11px]">{cartCount}</Badge>
               )}
-            </Button>
-            <Button variant="outline" size="sm" onClick={() => navigate("/admin")} className="hidden gap-1.5 sm:flex">
-              <ShieldCheck className="h-4 w-4" /> Admin
             </Button>
             {user ? (
               <DropdownMenu>
