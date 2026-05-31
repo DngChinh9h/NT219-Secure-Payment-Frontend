@@ -1,17 +1,9 @@
-import { createContext, useCallback, useContext, useMemo, useState, type ReactNode } from "react";
-import {
-  PRODUCTS,
-  SEED_AUDIT_LOGS,
-  SEED_ORDERS,
-  SEED_PROVIDER_EVENTS,
-  SEED_RECEIPTS,
-  SEED_TRANSACTIONS,
-} from "./mockData";
+import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
+import { PRODUCTS } from "./mockData";
 import type {
   AuditLog,
   CartItem,
   Order,
-  OrderStatus,
   Product,
   ProviderEvent,
   Receipt,
@@ -19,7 +11,28 @@ import type {
   Transaction,
   User,
 } from "./types";
-import { uid } from "./format";
+import {
+  adminService,
+  ApiError,
+  authService,
+  configService,
+  orderService,
+  paymentService,
+  receiptService,
+  refundService,
+  transactionService,
+  type PaymentIntentResult,
+  type PublicConfig,
+} from "../services";
+import { mapAuditLog, mapOrder, mapProvider, mapTransaction } from "../utils/statusMapper";
+
+interface RegisterInput {
+  email: string;
+  password: string;
+  fullName: string;
+  address: string;
+  citizenId: string;
+}
 
 interface AppState {
   user: User | null;
@@ -31,314 +44,245 @@ interface AppState {
   providerEvents: ProviderEvent[];
   auditLogs: AuditLog[];
   refundRequests: RefundRequest[];
+  publicConfig: PublicConfig;
+  dataLoading: boolean;
+  apiError: string | null;
 
-  login: (email: string, password: string) => User;
-  loginAsAdmin: () => void;
-  register: (data: { email: string; password: string; fullName: string; address: string; citizenId: string }) => User;
+  login: (email: string, password: string) => Promise<User>;
+  register: (data: RegisterInput) => Promise<User>;
   logout: () => void;
+  refreshData: () => Promise<void>;
+  loadOrder: (orderId: string) => Promise<Order>;
 
   addToCart: (productId: string, quantity?: number) => void;
   updateCartQty: (productId: string, quantity: number) => void;
   removeFromCart: (productId: string) => void;
   clearCart: () => void;
+  createOrderFromCart: (shippingAddress: string) => Promise<Order>;
 
-  createOrderFromCart: (shippingAddress: string) => Order;
-  setOrderProvider: (orderId: string, provider: "stripe" | "sandbox_bank") => void;
-  simulatePayment: (orderId: string, result: "approve" | "decline" | "pending") => { order: Order; transaction: Transaction; receipt?: Receipt };
-  requestRefund: (transactionId: string, reason: string) => Transaction;
-  syncPayment: (orderId: string) => { before: OrderStatus; after: OrderStatus; duplicatePrevented: boolean };
+  payForOrder: (orderId: string, provider: "stripe" | "mock_bank", paymentToken: string) => Promise<PaymentIntentResult>;
+  syncPayment: (paymentIntentId: string) => Promise<Record<string, any>>;
+  verifyReceiptForTransaction: (transactionId: string) => Promise<{ valid: boolean; payload?: Record<string, unknown>; error?: string }>;
+  refundTransaction: (transactionId: string, reason: string) => Promise<Record<string, any>>;
 
-  submitRefundRequest: (input: { orderId: string; reason: string; details?: string }) => RefundRequest;
-  cancelRefundRequest: (id: string) => void;
-  approveRefundRequest: (id: string) => void;
-  rejectRefundRequest: (id: string, rejectionReason: string, internalNote?: string) => void;
+  submitRefundRequest: (input: { orderId: string; reason: string; details?: string }) => never;
+  cancelRefundRequest: (id: string) => never;
+  approveRefundRequest: (id: string) => never;
+  rejectRefundRequest: (id: string, rejectionReason: string, internalNote?: string) => never;
 }
+
+const DEFAULT_CONFIG: PublicConfig = {
+  environment: "production",
+  providers: { stripe: false, mock_bank: false },
+  connected: false,
+};
 
 const AppContext = createContext<AppState | null>(null);
 
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : "Unexpected API error.";
+}
+
+function receiptFromTransaction(raw: Record<string, any>): Receipt | null {
+  if (!raw.jws_receipt) return null;
+  return {
+    id: raw.id,
+    transactionId: raw.id,
+    orderId: raw.order_id,
+    amount: Number(raw.amount ?? 0),
+    currency: String(raw.currency ?? "VND").toUpperCase(),
+    issuedAt: raw.created_at,
+    status: "issued",
+    rawJws: raw.jws_receipt,
+  };
+}
+
+function linkTransactions(orders: Order[], transactions: Transaction[]): Order[] {
+  return orders.map((order) => {
+    const transaction = transactions.find((item) => item.orderId === order.id);
+    return transaction
+      ? { ...order, transactionId: transaction.id, provider: order.provider ?? transaction.provider }
+      : order;
+  });
+}
+
 export function AppProvider({ children }: { children: ReactNode }) {
-  const [user, setUser] = useState<User | null>(null);
+  const [user, setUser] = useState<User | null>(() => authService.getStoredUser());
   const [cart, setCart] = useState<CartItem[]>([]);
   const [products] = useState<Product[]>(PRODUCTS);
-  const [orders, setOrders] = useState<Order[]>(SEED_ORDERS);
-  const [transactions, setTransactions] = useState<Transaction[]>(SEED_TRANSACTIONS);
-  const [receipts, setReceipts] = useState<Receipt[]>(SEED_RECEIPTS);
-  const [providerEvents, setProviderEvents] = useState<ProviderEvent[]>(SEED_PROVIDER_EVENTS);
-  const [auditLogs, setAuditLogs] = useState<AuditLog[]>(SEED_AUDIT_LOGS);
-  const [refundRequests, setRefundRequests] = useState<RefundRequest[]>([]);
+  const [orders, setOrders] = useState<Order[]>([]);
+  const [transactions, setTransactions] = useState<Transaction[]>([]);
+  const [receipts, setReceipts] = useState<Receipt[]>([]);
+  const [providerEvents] = useState<ProviderEvent[]>([]);
+  const [auditLogs, setAuditLogs] = useState<AuditLog[]>([]);
+  const [refundRequests] = useState<RefundRequest[]>([]);
+  const [publicConfig, setPublicConfig] = useState<PublicConfig>(DEFAULT_CONFIG);
+  const [dataLoading, setDataLoading] = useState(false);
+  const [apiError, setApiError] = useState<string | null>(null);
 
-  const login: AppState["login"] = useCallback((email) => {
-    const u: User = { email, fullName: email.split("@")[0], role: "customer" };
-    setUser(u);
-    return u;
+  useEffect(() => {
+    configService.getPublicConfig().then(setPublicConfig).catch((error) => {
+      setApiError(errorMessage(error));
+      setPublicConfig(DEFAULT_CONFIG);
+    });
   }, []);
 
-  const loginAsAdmin = useCallback(() => {
-    setUser({ email: "admin@securepay.io", fullName: "Operations Admin", role: "admin" });
+  const refreshData = useCallback(async () => {
+    if (!authService.getToken()) return;
+    setDataLoading(true);
+    setApiError(null);
+    try {
+      const [rawOrders, rawTransactions] = await Promise.all([
+        orderService.listMine(),
+        transactionService.listMine(),
+      ]);
+      const nextTransactions = rawTransactions.map((transaction) => mapTransaction(transaction, user));
+      setTransactions(nextTransactions);
+      setOrders(linkTransactions(rawOrders.map((order) => mapOrder(order, user)), nextTransactions));
+      setReceipts(rawTransactions.map(receiptFromTransaction).filter((receipt): receipt is Receipt => !!receipt));
+
+      if (user?.role === "admin") {
+        const logs = await adminService.listAuditLogs();
+        setAuditLogs(logs.map(mapAuditLog));
+      } else {
+        setAuditLogs([]);
+      }
+    } catch (error) {
+      setApiError(errorMessage(error));
+    } finally {
+      setDataLoading(false);
+    }
+  }, [user]);
+
+  useEffect(() => {
+    if (user) void refreshData();
+    else {
+      setOrders([]);
+      setTransactions([]);
+      setReceipts([]);
+      setAuditLogs([]);
+    }
+  }, [user, refreshData]);
+
+  const login = useCallback(async (email: string, password: string) => {
+    const nextUser = await authService.login(email, password);
+    setUser(nextUser);
+    return nextUser;
   }, []);
 
-  const register: AppState["register"] = useCallback((data) => {
-    const u: User = { email: data.email, fullName: data.fullName, address: data.address, citizenId: data.citizenId, role: "customer" };
-    setUser(u);
-    return u;
+  const register = useCallback(async (data: RegisterInput) => {
+    const nextUser = await authService.register(data);
+    setUser(nextUser);
+    return nextUser;
   }, []);
 
-  const logout = useCallback(() => setUser(null), []);
+  const logout = useCallback(() => {
+    authService.logout();
+    setUser(null);
+  }, []);
 
   const addToCart = useCallback((productId: string, quantity = 1) => {
-    setCart((c) => {
-      const existing = c.find((i) => i.productId === productId);
-      if (existing) return c.map((i) => (i.productId === productId ? { ...i, quantity: i.quantity + quantity } : i));
-      return [...c, { productId, quantity }];
+    setCart((current) => {
+      const existing = current.find((item) => item.productId === productId);
+      if (existing) {
+        return current.map((item) => item.productId === productId ? { ...item, quantity: item.quantity + quantity } : item);
+      }
+      return [...current, { productId, quantity }];
     });
   }, []);
 
   const updateCartQty = useCallback((productId: string, quantity: number) => {
-    setCart((c) => c.map((i) => (i.productId === productId ? { ...i, quantity: Math.max(1, quantity) } : i)));
+    setCart((current) => current.map((item) => item.productId === productId ? { ...item, quantity: Math.max(1, quantity) } : item));
   }, []);
 
   const removeFromCart = useCallback((productId: string) => {
-    setCart((c) => c.filter((i) => i.productId !== productId));
+    setCart((current) => current.filter((item) => item.productId !== productId));
   }, []);
 
   const clearCart = useCallback(() => setCart([]), []);
 
-  const pushAudit = useCallback((event: string, entity: string, result: AuditLog["result"] = "success") => {
-    setAuditLogs((logs) => [
-      { id: "log_" + uid(), at: new Date().toISOString(), actor: "system", event, entity, result, integrity: "ok", payload: "{...}" },
-      ...logs,
-    ]);
-  }, []);
-
-  const createOrderFromCart: AppState["createOrderFromCart"] = useCallback((shippingAddress) => {
-    const items = cart.map((c) => {
-      const p = products.find((p) => p.id === c.productId)!;
-      return { productId: p.id, name: p.name, unitPrice: p.price, quantity: c.quantity };
+  const createOrderFromCart = useCallback(async (shippingAddress: string) => {
+    const items = cart.map((item) => {
+      const product = products.find((candidate) => candidate.id === item.productId);
+      if (!product) throw new Error("A product in your cart is no longer available.");
+      return { productId: product.id, productName: product.name, quantity: item.quantity, unitPrice: product.price };
     });
-    const amount = items.reduce((s, i) => s + i.unitPrice * i.quantity, 0);
-    const id = "ord_" + uid();
-    const at = new Date().toISOString();
-    const order: Order = {
-      id,
-      customerEmail: user?.email ?? "guest@example.com",
-      customerName: user?.fullName ?? "Guest",
+    const raw = await orderService.createOrder({
       items,
-      amount,
-      status: "awaiting_payment",
       shippingAddress,
-      createdAt: at,
-      updatedAt: at,
-      timeline: [
-        { label: "Created", at, done: true },
-        { label: "Awaiting payment", at, done: true },
-      ],
-    };
-    setOrders((o) => [order, ...o]);
-    setCart([]);
-    pushAudit("order.created", id);
+      totalAmount: items.reduce((sum, item) => sum + item.unitPrice * item.quantity, 0),
+    });
+    const order = mapOrder(raw, user);
+    setOrders((current) => [order, ...current]);
+    clearCart();
     return order;
-  }, [cart, products, user, pushAudit]);
+  }, [cart, clearCart, products, user]);
 
-  const setOrderProvider = useCallback((orderId: string, provider: "stripe" | "sandbox_bank") => {
-    setOrders((all) => all.map((o) => (o.id === orderId ? { ...o, provider, updatedAt: new Date().toISOString() } : o)));
+  const loadOrder = useCallback(async (orderId: string) => {
+    const raw = await orderService.getById(orderId);
+    const mapped = mapOrder(raw, user);
+    let merged = mapped;
+    setOrders((current) => {
+      const existing = current.find((order) => order.id === orderId);
+      merged = existing?.items.length ? { ...mapped, items: existing.items } : mapped;
+      return existing ? current.map((order) => order.id === orderId ? merged : order) : [merged, ...current];
+    });
+    return merged;
+  }, [user]);
+
+  const payForOrder = useCallback(async (orderId: string, provider: "stripe" | "mock_bank", paymentToken: string) => {
+    const order = orders.find((candidate) => candidate.id === orderId) ?? await loadOrder(orderId);
+    try {
+      return await paymentService.createIntent({ orderId, provider, paymentToken, amount: order.amount });
+    } finally {
+      await refreshData();
+    }
+  }, [loadOrder, orders, refreshData]);
+
+  const syncPayment = useCallback(async (paymentIntentId: string) => {
+    const result = await paymentService.sync(paymentIntentId);
+    await refreshData();
+    return result;
+  }, [refreshData]);
+
+  const verifyReceiptForTransaction = useCallback(async (transactionId: string) => {
+    const { receipt } = await receiptService.getForTransaction(transactionId);
+    return receiptService.verify(receipt);
   }, []);
 
-  const simulatePayment: AppState["simulatePayment"] = useCallback((orderId, result) => {
-    const order = orders.find((o) => o.id === orderId);
-    if (!order) throw new Error("Order not found");
-    const at = new Date().toISOString();
-    const provider = order.provider ?? "sandbox_bank";
-    const txnId = "txn_" + uid();
-    const providerReference = provider === "stripe" ? "pi_" + uid() : "sb_ref_" + uid().toUpperCase();
-    let txnStatus: Transaction["status"];
-    let orderStatus: OrderStatus;
-    if (result === "approve") { txnStatus = "succeeded"; orderStatus = "paid"; }
-    else if (result === "decline") { txnStatus = "failed"; orderStatus = "failed"; }
-    else { txnStatus = "processing"; orderStatus = "processing"; }
+  const refundTransaction = useCallback(async (transactionId: string, reason: string) => {
+    const result = await refundService.refundTransaction(transactionId, reason);
+    await refreshData();
+    return result;
+  }, [refreshData]);
 
-    const receiptId = txnStatus === "succeeded" ? "rcpt_" + uid() : undefined;
-    const transaction: Transaction = {
-      id: txnId, orderId, customerEmail: order.customerEmail,
-      provider, providerReference, amount: order.amount,
-      status: txnStatus, refundStatus: "none", createdAt: at, receiptId,
-    };
-    let newReceipt: Receipt | undefined;
-    if (receiptId) {
-      newReceipt = {
-        id: receiptId, transactionId: txnId, orderId, amount: order.amount, currency: "VND",
-        issuedAt: at, status: "issued",
-        rawJws: "eyJhbGciOiJSUzI1NiJ9." + btoa(JSON.stringify({ txn: txnId, ord: orderId, amt: order.amount })) + ".SIG",
-      };
-      setReceipts((r) => [newReceipt!, ...r]);
-    }
-
-    const updatedOrder: Order = {
-      ...order,
-      provider,
-      status: orderStatus,
-      updatedAt: at,
-      transactionId: txnId,
-      timeline: [
-        ...order.timeline,
-        result === "approve" && { label: "Processing", at, done: true },
-        result === "approve" && { label: "Paid", at, done: true },
-        result === "decline" && { label: "Failed", at, done: true },
-        result === "pending" && { label: "Processing", at, done: true },
-      ].filter(Boolean) as Order["timeline"],
-    };
-
-    setTransactions((t) => [transaction, ...t]);
-    setOrders((all) => all.map((o) => (o.id === orderId ? updatedOrder : o)));
-    setProviderEvents((e) => [
-      { id: "evt_" + uid(), provider, eventType: txnStatus === "succeeded" ? "payment.succeeded" : txnStatus === "failed" ? "payment.failed" : "payment.processing",
-        paymentReference: providerReference, status: "processed", receivedAt: at, processedAt: at,
-        rawPayload: JSON.stringify({ ref: providerReference, status: txnStatus }) },
-      ...e,
-    ]);
-    pushAudit("payment." + txnStatus, txnId, txnStatus === "failed" ? "error" : "success");
-    return { order: updatedOrder, transaction, receipt: newReceipt };
-  }, [orders, pushAudit]);
-
-  const requestRefund: AppState["requestRefund"] = useCallback((transactionId, reason) => {
-    const at = new Date().toISOString();
-    let updated: Transaction | null = null;
-    setTransactions((all) =>
-      all.map((t) => {
-        if (t.id !== transactionId) return t;
-        updated = { ...t, status: "refunded", refundStatus: "processed", refundedAt: at, refundReason: reason };
-        return updated;
-      }),
-    );
-    if (updated) {
-      setOrders((all) =>
-        all.map((o) =>
-          o.id === updated!.orderId
-            ? { ...o, status: "refunded", updatedAt: at, timeline: [...o.timeline, { label: "Refunded", at, done: true }] }
-            : o,
-        ),
-      );
-      setProviderEvents((e) => [
-        { id: "evt_" + uid(), provider: updated!.provider, eventType: "charge.refunded",
-          paymentReference: updated!.providerReference, status: "processed", receivedAt: at, processedAt: at,
-          rawPayload: JSON.stringify({ ref: updated!.providerReference, refunded: true }) },
-        ...e,
-      ]);
-      pushAudit("refund.processed", transactionId);
-    }
-    return updated!;
-  }, [pushAudit]);
-
-  const syncPayment: AppState["syncPayment"] = useCallback((orderId) => {
-    const order = orders.find((o) => o.id === orderId);
-    if (!order) throw new Error("Not found");
-    const before = order.status;
-    const after = order.status === "awaiting_payment" ? "processing" : order.status;
-    setOrders((all) => all.map((o) => (o.id === orderId ? { ...o, status: after, updatedAt: new Date().toISOString() } : o)));
-    pushAudit("admin.payment.sync", orderId);
-    return { before, after, duplicatePrevented: true };
-  }, [orders, pushAudit]);
-
-  const submitRefundRequest: AppState["submitRefundRequest"] = useCallback(({ orderId, reason, details }) => {
-    const order = orders.find((o) => o.id === orderId);
-    if (!order) throw new Error("Order not found");
-    const at = new Date().toISOString();
-    const req: RefundRequest = {
-      id: "rfr_" + uid(),
-      orderId,
-      transactionId: order.transactionId,
-      customerEmail: order.customerEmail,
-      amount: order.amount,
-      reason,
-      details,
-      status: "pending_review",
-      submittedAt: at,
-      updatedAt: at,
-    };
-    setRefundRequests((all) => [req, ...all]);
-    pushAudit("refund.requested", req.id);
-    return req;
-  }, [orders, pushAudit]);
-
-  const cancelRefundRequest: AppState["cancelRefundRequest"] = useCallback((id) => {
-    const at = new Date().toISOString();
-    setRefundRequests((all) =>
-      all.map((r) => (r.id === id && r.status === "pending_review" ? { ...r, status: "cancelled", updatedAt: at } : r)),
-    );
-    pushAudit("refund.cancelled", id);
-  }, [pushAudit]);
-
-  const approveRefundRequest: AppState["approveRefundRequest"] = useCallback((id) => {
-    const at = new Date().toISOString();
-    let snapshot: RefundRequest | null = null;
-    setRefundRequests((all) =>
-      all.map((r) => {
-        if (r.id !== id) return r;
-        snapshot = { ...r, status: "approved_processing", updatedAt: at, reviewedAt: at, reviewedBy: user?.email ?? "admin" };
-        return snapshot;
-      }),
-    );
-    pushAudit("refund.approved", id);
-    setTimeout(() => {
-      const completedAt = new Date().toISOString();
-      let completed: RefundRequest | null = null;
-      setRefundRequests((all) =>
-        all.map((r) => {
-          if (r.id !== id) return r;
-          completed = { ...r, status: "refunded", updatedAt: completedAt, refundedAt: completedAt, refundTxnRef: "rf_" + uid() };
-          return completed;
-        }),
-      );
-      if (snapshot?.transactionId) {
-        setTransactions((ts) =>
-          ts.map((t) =>
-            t.id === snapshot!.transactionId
-              ? { ...t, status: "refunded", refundStatus: "processed", refundedAt: completedAt, refundReason: snapshot!.reason }
-              : t,
-          ),
-        );
-      }
-      if (snapshot) {
-        setOrders((os) =>
-          os.map((o) =>
-            o.id === snapshot!.orderId
-              ? { ...o, status: "refunded", updatedAt: completedAt, timeline: [...o.timeline, { label: "Refunded", at: completedAt, done: true }] }
-              : o,
-          ),
-        );
-      }
-      pushAudit("refund.completed", id);
-    }, 1200);
-  }, [pushAudit, user]);
-
-  const rejectRefundRequest: AppState["rejectRefundRequest"] = useCallback((id, rejectionReason, internalNote) => {
-    const at = new Date().toISOString();
-    setRefundRequests((all) =>
-      all.map((r) =>
-        r.id === id
-          ? { ...r, status: "rejected", updatedAt: at, reviewedAt: at, reviewedBy: user?.email ?? "admin", rejectionReason, internalNote }
-          : r,
-      ),
-    );
-    pushAudit("refund.rejected", id);
-  }, [pushAudit, user]);
+  const unsupportedRefundRequest = useCallback((): never => {
+    throw new ApiError(501, "Refund request API is not connected yet.");
+  }, []);
 
   const value = useMemo<AppState>(() => ({
     user, cart, products, orders, transactions, receipts, providerEvents, auditLogs, refundRequests,
-    login, loginAsAdmin, register, logout,
-    addToCart, updateCartQty, removeFromCart, clearCart,
-    createOrderFromCart, setOrderProvider, simulatePayment, requestRefund, syncPayment,
-    submitRefundRequest, cancelRefundRequest, approveRefundRequest, rejectRefundRequest,
-  }), [user, cart, products, orders, transactions, receipts, providerEvents, auditLogs, refundRequests,
-    login, loginAsAdmin, register, logout,
-    addToCart, updateCartQty, removeFromCart, clearCart,
-    createOrderFromCart, setOrderProvider, simulatePayment, requestRefund, syncPayment,
-    submitRefundRequest, cancelRefundRequest, approveRefundRequest, rejectRefundRequest]);
+    publicConfig, dataLoading, apiError,
+    login, register, logout, refreshData, loadOrder,
+    addToCart, updateCartQty, removeFromCart, clearCart, createOrderFromCart,
+    payForOrder, syncPayment, verifyReceiptForTransaction, refundTransaction,
+    submitRefundRequest: unsupportedRefundRequest,
+    cancelRefundRequest: unsupportedRefundRequest,
+    approveRefundRequest: unsupportedRefundRequest,
+    rejectRefundRequest: unsupportedRefundRequest,
+  }), [
+    user, cart, products, orders, transactions, receipts, providerEvents, auditLogs, refundRequests,
+    publicConfig, dataLoading, apiError,
+    login, register, logout, refreshData, loadOrder,
+    addToCart, updateCartQty, removeFromCart, clearCart, createOrderFromCart,
+    payForOrder, syncPayment, verifyReceiptForTransaction, refundTransaction, unsupportedRefundRequest,
+  ]);
 
   return <AppContext.Provider value={value}>{children}</AppContext.Provider>;
 }
 
 export function useApp(): AppState {
-  const ctx = useContext(AppContext);
-  if (!ctx) throw new Error("useApp must be used inside AppProvider");
-  return ctx;
+  const context = useContext(AppContext);
+  if (!context) throw new Error("useApp must be used inside AppProvider");
+  return context;
 }

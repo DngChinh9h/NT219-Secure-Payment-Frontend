@@ -2,83 +2,55 @@ import { useState } from "react";
 import { useApp } from "../../lib/store";
 import { Card, CardContent, CardHeader, CardTitle } from "../../components/ui/card";
 import { Button } from "../../components/ui/button";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "../../components/ui/table";
+import { Input } from "../../components/ui/input";
+import { Label } from "../../components/ui/label";
 import { StatusBadge } from "../../components/StatusBadge";
-import { formatDate, shortId } from "../../lib/format";
-import { RefreshCw, CheckCircle2 } from "lucide-react";
-
-interface SyncResult { orderId: string; before: string; after: string; duplicatePrevented: boolean; at: string; }
+import { RefreshCw } from "lucide-react";
+import { toast } from "sonner";
 
 export default function AdminPayments() {
-  const { transactions, syncPayment, orders } = useApp();
-  const [result, setResult] = useState<SyncResult | null>(null);
+  const { syncPayment } = useApp();
+  const [paymentIntentId, setPaymentIntentId] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [result, setResult] = useState<Record<string, any> | null>(null);
+
+  const sync = async () => {
+    if (!paymentIntentId.trim()) return;
+    setBusy(true);
+    try {
+      const next = await syncPayment(paymentIntentId.trim());
+      setResult(next);
+      toast.success("Payment state synced with provider.");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Unable to sync payment.");
+    } finally {
+      setBusy(false);
+    }
+  };
 
   return (
     <div className="space-y-5">
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight">Payments</h1>
-        <p className="text-sm text-slate-500">Monitor local payment state versus provider state.</p>
-      </div>
+      <div><h1 className="text-2xl font-semibold tracking-tight">Payments</h1><p className="text-sm text-slate-500">Sync a payment against the provider using its payment intent ID.</p></div>
       <Card className="border-slate-200">
-        <CardContent className="p-0">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Payment reference</TableHead><TableHead>Order</TableHead><TableHead>Provider</TableHead>
-                <TableHead>Provider status</TableHead><TableHead>Local order status</TableHead>
-                <TableHead>Last synced</TableHead><TableHead className="text-right">Actions</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {transactions.map((t) => {
-                const order = orders.find((o) => o.id === t.orderId);
-                return (
-                  <TableRow key={t.id} className="hover:bg-slate-50">
-                    <TableCell className="font-mono text-sm">{t.providerReference}</TableCell>
-                    <TableCell className="font-mono text-sm">{shortId(t.orderId, "#")}</TableCell>
-                    <TableCell><StatusBadge status={t.provider} /></TableCell>
-                    <TableCell><StatusBadge status={t.status} /></TableCell>
-                    <TableCell>{order && <StatusBadge status={order.status} />}</TableCell>
-                    <TableCell className="text-sm">{formatDate(t.createdAt)}</TableCell>
-                    <TableCell className="text-right">
-                      <Button size="sm" variant="outline" onClick={() => {
-                        const r = syncPayment(t.orderId);
-                        setResult({ orderId: t.orderId, before: r.before, after: r.after, duplicatePrevented: r.duplicatePrevented, at: new Date().toISOString() });
-                      }}><RefreshCw className="mr-1.5 h-3.5 w-3.5" />Sync</Button>
-                    </TableCell>
-                  </TableRow>
-                );
-              })}
-            </TableBody>
-          </Table>
+        <CardHeader><CardTitle className="text-base">Provider sync</CardTitle></CardHeader>
+        <CardContent className="space-y-3">
+          <Label htmlFor="payment-intent">Payment intent ID</Label>
+          <div className="flex gap-2"><Input id="payment-intent" value={paymentIntentId} onChange={(event) => setPaymentIntentId(event.target.value)} placeholder="pi_... or mock_pi_..." /><Button disabled={busy || !paymentIntentId.trim()} onClick={sync}><RefreshCw className="mr-2 h-4 w-4" />{busy ? "Syncing..." : "Sync"}</Button></div>
+          <div className="text-xs text-slate-500">The backend enforces ownership for customers and permits administrative sync for operators.</div>
         </CardContent>
       </Card>
-
       {result && (
-        <Card className="border-emerald-200 bg-emerald-50/50">
-          <CardHeader className="flex flex-row items-center gap-2">
-            <CheckCircle2 className="h-5 w-5 text-emerald-600" />
-            <CardTitle className="text-base text-emerald-900">Sync result</CardTitle>
-          </CardHeader>
-          <CardContent className="grid gap-2 text-sm sm:grid-cols-2">
-            <Row k="Order" v={shortId(result.orderId, "#")} mono />
-            <Row k="Local status before" v={<StatusBadge status={result.before} />} />
-            <Row k="Local status after" v={<StatusBadge status={result.after} />} />
-            <Row k="Transaction" v="Reused existing transaction" />
-            <Row k="Duplicate creation prevented" v={result.duplicatePrevented ? "Yes" : "No"} />
-            <Row k="Synced at" v={formatDate(result.at)} />
-          </CardContent>
-        </Card>
+        <Card className="border-emerald-200 bg-emerald-50/50"><CardHeader><CardTitle className="text-base">Sync result</CardTitle></CardHeader><CardContent className="grid gap-2 text-sm sm:grid-cols-2">
+          <Row label="Provider" value={<StatusBadge status={String(result.provider)} />} />
+          <Row label="Provider status" value={<StatusBadge status={String(result.providerStatus)} />} />
+          <Row label="Order status" value={<StatusBadge status={String(result.orderStatus)} />} />
+          <Row label="Payment reference" value={<span className="font-mono text-xs">{String(result.paymentIntentId)}</span>} />
+        </CardContent></Card>
       )}
     </div>
   );
 }
 
-function Row({ k, v, mono }: { k: string; v: React.ReactNode; mono?: boolean }) {
-  return (
-    <div className="flex items-center justify-between rounded-md bg-white p-2 ring-1 ring-emerald-100">
-      <span className="text-slate-500">{k}</span>
-      <span className={mono ? "font-mono" : ""}>{v}</span>
-    </div>
-  );
+function Row({ label, value }: { label: string; value: React.ReactNode }) {
+  return <div className="flex items-center justify-between rounded-md bg-white p-2 ring-1 ring-emerald-100"><span className="text-slate-500">{label}</span><span>{value}</span></div>;
 }

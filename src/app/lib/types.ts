@@ -1,6 +1,6 @@
 export type OrderStatus = "created" | "awaiting_payment" | "processing" | "paid" | "failed" | "refunded";
 export type TransactionStatus = "pending" | "processing" | "succeeded" | "failed" | "refunded";
-export type PaymentProvider = "stripe" | "sandbox_bank";
+export type PaymentProvider = "stripe" | "mock_bank";
 export type ProviderEventStatus = "received" | "processed" | "failed" | "duplicate";
 export type RefundStatus = "none" | "requested" | "processed" | "rejected";
 export type HealthStatus = "healthy" | "warning" | "failed" | "unchecked";
@@ -122,6 +122,7 @@ export interface RefundRequest {
 }
 
 export interface User {
+  id: string;
   email: string;
   fullName: string;
   address?: string;

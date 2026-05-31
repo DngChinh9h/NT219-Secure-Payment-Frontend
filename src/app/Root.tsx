@@ -1,18 +1,8 @@
 import React from "react";
-import { MemoryRouter, Routes, Route, Navigate } from "react-router";
-
-if (typeof window !== "undefined" && !(window as any).__rechartsWarnFilter) {
-  (window as any).__rechartsWarnFilter = true;
-  const origError = console.error;
-  console.error = (...args: unknown[]) => {
-    const first = args[0];
-    if (typeof first === "string" && first.includes("Encountered two children with the same key")) return;
-    origError.apply(console, args as []);
-  };
-}
+import { BrowserRouter, Routes, Route, Navigate } from "react-router";
 import { AppProvider } from "./lib/store";
 import { Toaster } from "./components/ui/sonner";
-import { RequireAuth, RequireAdmin } from "./components/Guards";
+import { Forbidden, RequireAuth, RequireAdmin } from "./components/Guards";
 
 import CustomerLayout from "./layouts/CustomerLayout";
 import AdminLayout from "./layouts/AdminLayout";
@@ -73,10 +63,11 @@ export default function Root() {
   return (
     <ErrorBoundary>
       <AppProvider>
-        <MemoryRouter initialEntries={["/shop"]}>
+        <BrowserRouter>
           <Routes>
             <Route path="/login" element={<LoginPage />} />
             <Route path="/register" element={<RegisterPage />} />
+            <Route path="/forbidden" element={<Forbidden />} />
 
             <Route element={<CustomerLayout />}>
               <Route path="/shop" element={<Shop />} />
@@ -139,7 +130,7 @@ export default function Root() {
             <Route path="*" element={<Navigate to="/shop" replace />} />
           </Routes>
           <Toaster />
-        </MemoryRouter>
+        </BrowserRouter>
       </AppProvider>
     </ErrorBoundary>
   );

@@ -13,17 +13,25 @@ export default function CartPage() {
   const { cart, products, updateCartQty, removeFromCart, createOrderFromCart, user } = useApp();
   const navigate = useNavigate();
   const [address, setAddress] = useState(user?.address ?? "");
+  const [busy, setBusy] = useState(false);
 
   const items = cart.map((c) => ({ ...c, product: products.find((p) => p.id === c.productId)! }));
   const subtotal = items.reduce((s, i) => s + i.product.price * i.quantity, 0);
 
-  const checkout = () => {
+  const checkout = async () => {
     if (!user) { toast.error("Please sign in first"); navigate("/login"); return; }
     if (items.length === 0) { toast.error("Your cart is empty"); return; }
     if (!address.trim()) { toast.error("Please enter a shipping address"); return; }
-    const order = createOrderFromCart(address);
-    toast.success("Order created");
-    navigate(`/checkout/${order.id}`);
+    setBusy(true);
+    try {
+      const order = await createOrderFromCart(address);
+      toast.success("Order created");
+      navigate(`/checkout/${order.id}`);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Unable to create order.");
+    } finally {
+      setBusy(false);
+    }
   };
 
   return (
@@ -90,7 +98,7 @@ export default function CartPage() {
                     Final amount will be confirmed by the server when the order is created.
                   </div>
                 </div>
-                <Button className="w-full bg-indigo-600 hover:bg-indigo-700" onClick={checkout}>Create order</Button>
+                <Button disabled={busy} className="w-full bg-indigo-600 hover:bg-indigo-700" onClick={checkout}>{busy ? "Creating order..." : "Create order"}</Button>
                 <div className="flex items-center justify-center gap-1.5 text-xs text-slate-500">
                   <ShieldCheck className="h-3.5 w-3.5" /> Secure checkout by SecurePay
                 </div>

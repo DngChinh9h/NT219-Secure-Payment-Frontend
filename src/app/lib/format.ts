@@ -12,6 +12,3 @@ export const formatDateOnly = (iso: string): string => {
 };
 
 export const shortId = (id: string, prefix = ""): string => `${prefix}${id.slice(0, 8).toUpperCase()}`;
-
-export const uid = (): string =>
-  Math.random().toString(36).slice(2, 10) + Math.random().toString(36).slice(2, 6);

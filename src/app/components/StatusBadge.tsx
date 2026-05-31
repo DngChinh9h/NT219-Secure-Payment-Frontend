@@ -35,7 +35,7 @@ const TONE: Record<string, string> = {
 
 const LABEL: Record<string, string> = {
   awaiting_payment: "Awaiting payment",
-  sandbox_bank: "Sandbox Bank",
+  mock_bank: "Sandbox Bank",
   stripe: "Stripe",
   none: "No refund",
   failed: "Payment failed",

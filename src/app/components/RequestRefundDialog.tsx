@@ -50,9 +50,11 @@ export function RequestRefundDialog({
       toast.error("A refund request for this order is already under review.");
       return;
     }
-    submitRefundRequest({ orderId: order.id, reason, details: details.trim() || undefined });
-    toast.success("Refund request submitted.");
-    onOpenChange(false);
+    try {
+      submitRefundRequest({ orderId: order.id, reason, details: details.trim() || undefined });
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Refund request API is not connected yet.");
+    }
   };
 
   return (

@@ -21,7 +21,7 @@ const FILTERS = [
 ];
 
 export default function AuditTrail() {
-  const { auditLogs } = useApp();
+  const { auditLogs, dataLoading, apiError } = useApp();
   const [filter, setFilter] = useState("all");
   const [selected, setSelected] = useState<AuditLog | null>(null);
 
@@ -66,6 +66,9 @@ export default function AuditTrail() {
                   </TableCell>
                 </TableRow>
               ))}
+              {filtered.length === 0 && (
+                <TableRow><TableCell colSpan={7} className="py-10 text-center text-sm text-slate-500">{dataLoading ? "Loading audit records..." : apiError ?? "No audit records returned by the API."}</TableCell></TableRow>
+              )}
             </TableBody>
           </Table>
         </CardContent>

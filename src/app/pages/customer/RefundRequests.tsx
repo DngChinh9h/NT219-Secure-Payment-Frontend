@@ -34,6 +34,9 @@ export default function RefundRequests() {
         <h1 className="text-2xl font-semibold tracking-tight">Refund Requests</h1>
         <p className="text-sm text-slate-500">Request and track refunds for eligible paid orders.</p>
       </div>
+      <div className="rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+        Refund request API is not connected yet. Submissions are not persisted until the backend exposes a refund-request workflow.
+      </div>
 
       <Card className="border-slate-200">
         <CardHeader className="flex flex-row items-center justify-between gap-3">

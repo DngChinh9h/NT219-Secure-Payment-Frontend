@@ -25,7 +25,7 @@ const FILTERS = [
 type Verification = "authentic" | "invalid" | "unknown" | null;
 
 export default function MyOrders() {
-  const { orders, user, transactions, receipts, refundRequests } = useApp();
+  const { orders, transactions, receipts, refundRequests, verifyReceiptForTransaction, dataLoading, apiError } = useApp();
   const navigate = useNavigate();
   const [filter, setFilter] = useState("all");
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -34,8 +34,8 @@ export default function MyOrders() {
   const [refundOrder, setRefundOrder] = useState<Order | null>(null);
 
   const myOrders = useMemo(
-    () => orders.filter((o) => !user || o.customerEmail === user.email || true),
-    [orders, user],
+    () => orders,
+    [orders],
   );
   const filtered = filter === "all" ? myOrders : myOrders.filter((o) => o.status === filter);
   const selected = selectedId ? orders.find((o) => o.id === selectedId) ?? null : null;
@@ -106,7 +106,7 @@ export default function MyOrders() {
                 );
               })}
               {filtered.length === 0 && (
-                <TableRow><TableCell colSpan={7} className="py-10 text-center text-sm text-slate-500">No orders in this view.</TableCell></TableRow>
+                <TableRow><TableCell colSpan={7} className="py-10 text-center text-sm text-slate-500">{dataLoading ? "Loading orders..." : apiError ?? "No orders in this view."}</TableCell></TableRow>
               )}
             </TableBody>
           </Table>
@@ -207,8 +207,15 @@ export default function MyOrders() {
                       <div className="flex flex-wrap gap-2 pt-1">
                         <Button size="sm" className="bg-indigo-600 hover:bg-indigo-700"
                           onClick={() => {
-                            setVerifyResult("authentic");
-                            toast.success("Receipt verified as authentic");
+                            verifyReceiptForTransaction(txn!.id)
+                              .then((result) => {
+                                setVerifyResult(result.valid ? "authentic" : "invalid");
+                                result.valid ? toast.success("Receipt verified as authentic") : toast.error("Receipt is invalid or modified");
+                              })
+                              .catch(() => {
+                                setVerifyResult("unknown");
+                                toast.error("Unable to verify receipt");
+                              });
                           }}>
                           Verify receipt
                         </Button>

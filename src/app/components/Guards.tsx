@@ -39,7 +39,7 @@ export function Forbidden() {
           </div>
           <div className="flex justify-center gap-2">
             <Button variant="outline" onClick={() => navigate("/shop")}>Back to shop</Button>
-            <Button className="bg-indigo-600 hover:bg-indigo-700" onClick={() => navigate("/login")}>Sign in as operator</Button>
+            <Button className="bg-indigo-600 hover:bg-indigo-700" onClick={() => navigate("/login")}>Sign in</Button>
           </div>
         </CardContent>
       </Card>
