@@ -75,6 +75,44 @@ async function stubSecurityMetadata(page: Page) {
       },
     }),
   );
+  await stubReconciliationAndRiskMetadata(page);
+}
+
+async function stubReconciliationAndRiskMetadata(page: Page) {
+  await page.route("**/api/admin/security/reconciliation", (route) =>
+    fulfillJson(route, {
+      totalOrders: 3,
+      paidOrders: 2,
+      refundedOrders: 1,
+      successfulTransactions: 2,
+      refundedTransactions: 1,
+      providerLinkedPayments: 3,
+      providerLinkedRefunds: 1,
+      mismatchCount: 1,
+      mismatches: [{
+        type: "paid_order_without_successful_transaction",
+        orderId: "order-1",
+        occurrenceCount: 1,
+      }],
+      status: "mismatch_detected",
+      checkedAt: "2026-06-01T00:00:01.000Z",
+    }),
+  );
+  await page.route("**/api/admin/security/risk-evidence", (route) =>
+    fulfillJson(route, {
+      status: "clear",
+      triggeredRules: 0,
+      checkedAt: "2026-06-01T00:00:02.000Z",
+      rules: {
+        repeatedFailedPayments: { enabled: true, threshold: 3, flaggedUsers: [] },
+        manyRefundRequests: { enabled: true, threshold: 3, flaggedUsers: [] },
+        duplicatePaymentAttemptsBlocked: { enabled: true, observedCount: 0 },
+        duplicateRefundAttemptsBlocked: { enabled: true, observedCount: 0 },
+        suspiciousProviderFailures: { enabled: true, observedCount: 0, refundRequests: [] },
+        highAmountOrders: { enabled: true, threshold: 10000000, observedCount: 0, orders: [] },
+      },
+    }),
+  );
 }
 
 async function stubAdminOperationApis(page: Page) {
@@ -131,11 +169,15 @@ async function openSecurityOperations(page: Page) {
   const evidenceResponse = apiResponse(page, "GET", "/api/admin/security/evidence");
   const hardeningResponse = apiResponse(page, "GET", "/api/admin/security/hardening");
   const keyStatusResponse = apiResponse(page, "GET", "/api/admin/security/keys/status");
+  const reconciliationResponse = apiResponse(page, "GET", "/api/admin/security/reconciliation");
+  const riskEvidenceResponse = apiResponse(page, "GET", "/api/admin/security/risk-evidence");
   await page.goto("/admin/security");
   await expect(page.getByRole("heading", { name: "Security operations" })).toBeVisible();
   await expect((await evidenceResponse).ok()).toBeTruthy();
   await expect((await hardeningResponse).ok()).toBeTruthy();
   await expect((await keyStatusResponse).ok()).toBeTruthy();
+  await expect((await reconciliationResponse).ok()).toBeTruthy();
+  await expect((await riskEvidenceResponse).ok()).toBeTruthy();
   await expect(page.getByRole("button", { name: "Refresh evidence" })).toBeEnabled();
 }
 
@@ -184,6 +226,7 @@ test.describe.serial("Phase 7 deployment readiness UI", () => {
 
   test("security operations renders live evidence and key status API data", async ({ page }) => {
     await stubBackgroundApis(page);
+    await stubReconciliationAndRiskMetadata(page);
     await restoreAdminSession(page);
     await openSecurityOperations(page);
 
@@ -198,6 +241,18 @@ test.describe.serial("Phase 7 deployment readiness UI", () => {
     await expect(page.getByTestId("hardening-cors_restriction")).toContainText("Enabled");
     await expect(page.getByTestId("hardening-security_headers")).toContainText("Enabled");
     await expect(page.getByTestId("hardening-secret_scan_status")).toContainText("Warning");
+    await expect(page.getByRole("heading", { name: "Payment Reconciliation" })).toBeVisible();
+    await expect(page.getByTestId("reconciliation-mismatch-count")).toHaveText(/^\d+$/);
+    await expect(page.getByTestId("reconciliation-mismatches-table")).toBeVisible();
+    await expect(page.getByText("Paid order does not have a successful transaction.")).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Fraud / Risk Evidence" })).toBeVisible();
+    await expect(page.getByText("No risk flags found")).toBeVisible();
+    await expect(page.getByTestId("risk-repeated_failed_payments")).toBeVisible();
+    await expect(page.getByTestId("risk-many_refund_requests")).toBeVisible();
+    await expect(page.getByTestId("risk-duplicate_payment_attempts_blocked")).toBeVisible();
+    await expect(page.getByTestId("risk-duplicate_refund_attempts_blocked")).toBeVisible();
+    await expect(page.getByTestId("risk-suspicious_provider_failures")).toBeVisible();
+    await expect(page.getByTestId("risk-high_amount_orders")).toBeVisible();
   });
 
   test("admin operation pages call APIs and render real empty states without placeholders", async ({ page }) => {
@@ -231,6 +286,7 @@ test.describe.serial("Phase 7 deployment readiness UI", () => {
 
   test("rotates a signing key and closes the confirmation overlay", async ({ page }) => {
     await stubBackgroundApis(page);
+    await stubReconciliationAndRiskMetadata(page);
     await restoreAdminSession(page);
     await openSecurityOperations(page);
     const previousVersion = await page.getByTestId("active-key-version").innerText();
@@ -242,12 +298,16 @@ test.describe.serial("Phase 7 deployment readiness UI", () => {
     const refreshedEvidence = apiResponse(page, "GET", "/api/admin/security/evidence");
     const refreshedHardening = apiResponse(page, "GET", "/api/admin/security/hardening");
     const refreshedKeyStatus = apiResponse(page, "GET", "/api/admin/security/keys/status");
+    const refreshedReconciliation = apiResponse(page, "GET", "/api/admin/security/reconciliation");
+    const refreshedRiskEvidence = apiResponse(page, "GET", "/api/admin/security/risk-evidence");
     await page.getByRole("button", { name: "Confirm rotation" }).click();
 
     await expect((await rotateResponse).ok()).toBeTruthy();
     await expect((await refreshedEvidence).ok()).toBeTruthy();
     await expect((await refreshedHardening).ok()).toBeTruthy();
     await expect((await refreshedKeyStatus).ok()).toBeTruthy();
+    await expect((await refreshedReconciliation).ok()).toBeTruthy();
+    await expect((await refreshedRiskEvidence).ok()).toBeTruthy();
     await expect(page.getByRole("heading", { name: "Rotate receipt signing key?" })).toBeHidden();
     await expect(page.locator('[data-slot="alert-dialog-overlay"]')).toHaveCount(0);
     await expect(page.getByRole("button", { name: "Rotate key" })).toBeEnabled();
@@ -321,11 +381,27 @@ test.describe.serial("Phase 7 deployment readiness UI", () => {
         body: JSON.stringify({ error: "Synthetic hardening outage" }),
       });
     });
+    await page.route("**/api/admin/security/reconciliation", async (route) => {
+      await route.fulfill({
+        status: 500,
+        contentType: "application/json",
+        body: JSON.stringify({ error: "Synthetic reconciliation outage" }),
+      });
+    });
+    await page.route("**/api/admin/security/risk-evidence", async (route) => {
+      await route.fulfill({
+        status: 500,
+        contentType: "application/json",
+        body: JSON.stringify({ error: "Synthetic risk evidence outage" }),
+      });
+    });
 
     await page.goto("/admin/security");
     await expect(page.getByRole("button", { name: "Refreshing..." })).toBeVisible();
     await expect(page.getByText("Security evidence is not connected: Synthetic evidence outage")).toBeVisible();
     await expect(page.getByText("Security hardening evidence is not connected: Synthetic hardening outage")).toBeVisible();
+    await expect(page.getByText("Payment reconciliation evidence is not connected: Synthetic reconciliation outage")).toBeVisible();
+    await expect(page.getByText("Fraud and risk evidence is not connected: Synthetic risk evidence outage")).toBeVisible();
     await expect(page.getByRole("heading", { name: "Security Hardening" })).toBeVisible();
     await expect(page.getByRole("heading", { name: "Security operations" })).toBeVisible();
     await expect(page.locator('[data-slot="alert-dialog-overlay"]')).toHaveCount(0);
@@ -350,6 +426,12 @@ test.describe.serial("Phase 7 deployment readiness UI", () => {
         availableKeyVersions: [1],
         keyRotationEnabled: false,
       }),
+    );
+    await page.route("**/api/admin/security/reconciliation", (route) =>
+      fulfillJson(route, {}),
+    );
+    await page.route("**/api/admin/security/risk-evidence", (route) =>
+      fulfillJson(route, {}),
     );
 
     await page.goto("/admin/security");

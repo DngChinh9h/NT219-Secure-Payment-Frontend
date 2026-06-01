@@ -39,6 +39,46 @@ export interface SecurityHardening {
   attackEvidence: SecurityHardeningItem[];
 }
 
+export interface ReconciliationMismatch {
+  type: string;
+  orderId?: string;
+  transactionId?: string;
+  refundRequestId?: string;
+  occurrenceCount: number;
+  description?: string;
+  severity?: string;
+}
+
+export interface ReconciliationEvidence {
+  totalOrders: number;
+  paidOrders: number;
+  refundedOrders: number;
+  successfulTransactions: number;
+  refundedTransactions: number;
+  providerLinkedPayments: number;
+  providerLinkedRefunds: number;
+  mismatchCount: number;
+  mismatches: ReconciliationMismatch[];
+  status: string;
+  checkedAt?: string;
+}
+
+export interface RiskEvidenceRule {
+  enabled: boolean;
+  threshold?: number;
+  observedCount: number;
+  flaggedUsers: Record<string, unknown>[];
+  orders: Record<string, unknown>[];
+  refundRequests: Record<string, unknown>[];
+}
+
+export interface RiskEvidence {
+  status: string;
+  triggeredRules: number;
+  checkedAt?: string;
+  rules: Record<string, RiskEvidenceRule>;
+}
+
 export interface AdminOrder {
   id: string;
   customerEmail: string;
@@ -251,6 +291,77 @@ function mapEvidence(raw: unknown): SecurityEvidence[] {
   });
 }
 
+function toNumber(value: unknown): number {
+  const number = Number(value ?? 0);
+  return Number.isFinite(number) ? number : 0;
+}
+
+function optionalString(value: unknown): string | undefined {
+  return typeof value === "string" && value ? value : undefined;
+}
+
+function recordArray(value: unknown): Record<string, unknown>[] {
+  return Array.isArray(value) ? value.map(asRecord) : [];
+}
+
+function mapReconciliationEvidence(raw: unknown): ReconciliationEvidence {
+  const response = asRecord(raw);
+  const mismatches = Array.isArray(response.mismatches) ? response.mismatches.map((item) => {
+    const mismatch = asRecord(item);
+    return {
+      type: String(mismatch.type ?? "unknown"),
+      orderId: optionalString(mismatch.orderId ?? mismatch.order_id),
+      transactionId: optionalString(mismatch.transactionId ?? mismatch.transaction_id),
+      refundRequestId: optionalString(mismatch.refundRequestId ?? mismatch.refund_request_id),
+      occurrenceCount: toNumber(mismatch.occurrenceCount ?? mismatch.occurrence_count ?? 1),
+      description: optionalString(mismatch.description),
+      severity: optionalString(mismatch.severity),
+    };
+  }) : [];
+
+  return {
+    totalOrders: toNumber(response.totalOrders ?? response.total_orders),
+    paidOrders: toNumber(response.paidOrders ?? response.paid_orders),
+    refundedOrders: toNumber(response.refundedOrders ?? response.refunded_orders),
+    successfulTransactions: toNumber(response.successfulTransactions ?? response.successful_transactions),
+    refundedTransactions: toNumber(response.refundedTransactions ?? response.refunded_transactions),
+    providerLinkedPayments: toNumber(response.providerLinkedPayments ?? response.provider_linked_payments),
+    providerLinkedRefunds: toNumber(response.providerLinkedRefunds ?? response.provider_linked_refunds),
+    mismatchCount: toNumber(response.mismatchCount ?? response.mismatch_count ?? mismatches.length),
+    mismatches,
+    status: String(response.status ?? "unknown"),
+    checkedAt: optionalString(response.checkedAt ?? response.checked_at),
+  };
+}
+
+function mapRiskEvidenceRule(raw: unknown): RiskEvidenceRule {
+  const rule = asRecord(raw);
+  const flaggedUsers = recordArray(rule.flaggedUsers ?? rule.flagged_users);
+  const orders = recordArray(rule.orders);
+  const refundRequests = recordArray(rule.refundRequests ?? rule.refund_requests);
+  const derivedObservedCount = flaggedUsers.length || orders.length || refundRequests.length;
+  return {
+    enabled: rule.enabled === true,
+    threshold: rule.threshold === undefined ? undefined : toNumber(rule.threshold),
+    observedCount: toNumber(rule.observedCount ?? rule.observed_count ?? derivedObservedCount),
+    flaggedUsers,
+    orders,
+    refundRequests,
+  };
+}
+
+function mapRiskEvidence(raw: unknown): RiskEvidence {
+  const response = asRecord(raw);
+  return {
+    status: String(response.status ?? "unknown"),
+    triggeredRules: toNumber(response.triggeredRules ?? response.triggered_rules),
+    checkedAt: optionalString(response.checkedAt ?? response.checked_at),
+    rules: Object.fromEntries(
+      Object.entries(asRecord(response.rules)).map(([key, rule]) => [normalizeKey(key), mapRiskEvidenceRule(rule)]),
+    ),
+  };
+}
+
 export const adminService = {
   async getOrders(): Promise<AdminOrder[]> {
     const result = await apiClient.get<{ items: Record<string, any>[] }>("/api/admin/orders");
@@ -311,6 +422,14 @@ export const adminService = {
   async getSecurityHardening() {
     const result = await apiClient.get<unknown>("/api/admin/security/hardening");
     return mapSecurityHardening(result);
+  },
+  async getReconciliationEvidence() {
+    const result = await apiClient.get<unknown>("/api/admin/security/reconciliation");
+    return mapReconciliationEvidence(result);
+  },
+  async getRiskEvidence() {
+    const result = await apiClient.get<unknown>("/api/admin/security/risk-evidence");
+    return mapRiskEvidence(result);
   },
   async getReceiptSigningKeyStatus() {
     return apiClient.get<ReceiptSigningKeyStatus>("/api/admin/security/keys/status");

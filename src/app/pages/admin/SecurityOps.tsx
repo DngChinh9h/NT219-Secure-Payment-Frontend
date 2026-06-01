@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "../../components/ui/card";
 import { Button } from "../../components/ui/button";
 import { Textarea } from "../../components/ui/textarea";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "../../components/ui/table";
 import { StatusBadge } from "../../components/StatusBadge";
 import {
   AlertDialog,
@@ -18,14 +19,18 @@ import {
   receiptService,
   SECURITY_EVIDENCE_CONTROLS,
   SECURITY_HARDENING_CONTROLS,
+  type ReconciliationEvidence,
+  type ReconciliationMismatch,
   type ReceiptSigningKeyStatus,
+  type RiskEvidence,
+  type RiskEvidenceRule,
   type SecurityEvidence,
   type SecurityEvidenceStatus,
   type SecurityHardening,
   type SecurityHardeningItem,
   type SecurityHardeningStatus,
 } from "../../services";
-import { KeyRound, RefreshCw, RotateCcw, Shield, ShieldCheck } from "lucide-react";
+import { AlertTriangle, KeyRound, RefreshCw, RotateCcw, Shield, ShieldCheck } from "lucide-react";
 import { formatDate } from "../../lib/format";
 import { toast } from "sonner";
 
@@ -34,13 +39,26 @@ interface ReceiptResult {
   error?: string;
 }
 
+const RISK_CARD_CONFIG = [
+  { id: "repeated_failed_payments", title: "Repeated failed payments", detail: "Users meeting the backend failed-payment threshold." },
+  { id: "many_refund_requests", title: "Many refund requests", detail: "Users meeting the backend refund-request threshold." },
+  { id: "duplicate_payment_attempts_blocked", title: "Duplicate payment attempts blocked", detail: "Duplicate payment attempts blocked by backend controls." },
+  { id: "duplicate_refund_attempts_blocked", title: "Duplicate refund attempts blocked", detail: "Duplicate refund or approval attempts blocked by backend controls." },
+  { id: "suspicious_provider_failures", title: "Suspicious provider failures", detail: "Provider failures reported by backend risk evidence." },
+  { id: "high_amount_orders", title: "High amount orders", detail: "Orders meeting the backend high-amount threshold." },
+] as const;
+
 export default function SecurityOps() {
   const [evidence, setEvidence] = useState<SecurityEvidence[] | null>(null);
   const [hardening, setHardening] = useState<SecurityHardening | null>(null);
+  const [reconciliation, setReconciliation] = useState<ReconciliationEvidence | null>(null);
+  const [riskEvidence, setRiskEvidence] = useState<RiskEvidence | null>(null);
   const [keyStatus, setKeyStatus] = useState<ReceiptSigningKeyStatus | null>(null);
   const [evidenceLoading, setEvidenceLoading] = useState(true);
   const [evidenceError, setEvidenceError] = useState<string | null>(null);
   const [hardeningError, setHardeningError] = useState<string | null>(null);
+  const [reconciliationError, setReconciliationError] = useState<string | null>(null);
+  const [riskEvidenceError, setRiskEvidenceError] = useState<string | null>(null);
   const [keyStatusError, setKeyStatusError] = useState<string | null>(null);
   const [rotateDialogOpen, setRotateDialogOpen] = useState(false);
   const [rotateLoading, setRotateLoading] = useState(false);
@@ -52,12 +70,16 @@ export default function SecurityOps() {
     setEvidenceLoading(true);
     setEvidenceError(null);
     setHardeningError(null);
+    setReconciliationError(null);
+    setRiskEvidenceError(null);
     setKeyStatusError(null);
     try {
-      const [evidenceResult, hardeningResult, keyStatusResult] = await Promise.allSettled([
+      const [evidenceResult, hardeningResult, keyStatusResult, reconciliationResult, riskEvidenceResult] = await Promise.allSettled([
         adminService.getSecurityEvidence(),
         adminService.getSecurityHardening(),
         adminService.getReceiptSigningKeyStatus(),
+        adminService.getReconciliationEvidence(),
+        adminService.getRiskEvidence(),
       ]);
       if (evidenceResult.status === "fulfilled") {
         setEvidence(evidenceResult.value);
@@ -76,6 +98,18 @@ export default function SecurityOps() {
       } else {
         setKeyStatus(null);
         setKeyStatusError(keyStatusResult.reason instanceof Error ? keyStatusResult.reason.message : "Unable to load receipt signing key status.");
+      }
+      if (reconciliationResult.status === "fulfilled") {
+        setReconciliation(reconciliationResult.value);
+      } else {
+        setReconciliation(null);
+        setReconciliationError(reconciliationResult.reason instanceof Error ? reconciliationResult.reason.message : "Unable to load payment reconciliation evidence.");
+      }
+      if (riskEvidenceResult.status === "fulfilled") {
+        setRiskEvidence(riskEvidenceResult.value);
+      } else {
+        setRiskEvidence(null);
+        setRiskEvidenceError(riskEvidenceResult.reason instanceof Error ? riskEvidenceResult.reason.message : "Unable to load fraud and risk evidence.");
       }
     } finally {
       setEvidenceLoading(false);
@@ -234,6 +268,101 @@ export default function SecurityOps() {
         </section>
       )}
 
+      <section className="space-y-4" aria-labelledby="payment-reconciliation-title" data-testid="payment-reconciliation-section">
+        <div>
+          <h2 id="payment-reconciliation-title" className="text-xl font-semibold tracking-tight">Payment Reconciliation</h2>
+          <p className="text-sm text-slate-500">Compare order, transaction, refund, and provider-link records returned by the backend.</p>
+        </div>
+        {reconciliationError && (
+          <div className="rounded-md border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-800">
+            Payment reconciliation evidence is not connected: {reconciliationError}
+          </div>
+        )}
+        <Card className="border-slate-200">
+          <CardContent className="space-y-4 p-5">
+            <div className="grid gap-3 text-sm sm:grid-cols-2 lg:grid-cols-4">
+              <Metric label="Total orders" value={metricValue(reconciliation?.totalOrders, evidenceLoading)} />
+              <Metric label="Paid orders" value={metricValue(reconciliation?.paidOrders, evidenceLoading)} />
+              <Metric label="Refunded orders" value={metricValue(reconciliation?.refundedOrders, evidenceLoading)} />
+              <Metric label="Successful transactions" value={metricValue(reconciliation?.successfulTransactions, evidenceLoading)} />
+              <Metric label="Refunded transactions" value={metricValue(reconciliation?.refundedTransactions, evidenceLoading)} />
+              <Metric label="Provider linked payments" value={metricValue(reconciliation?.providerLinkedPayments, evidenceLoading)} />
+              <Metric label="Provider linked refunds" value={metricValue(reconciliation?.providerLinkedRefunds, evidenceLoading)} />
+              <Metric label="Mismatch count" value={metricValue(reconciliation?.mismatchCount, evidenceLoading)} testId="reconciliation-mismatch-count" />
+            </div>
+            {reconciliation?.checkedAt && (
+              <div className="text-xs text-slate-400">Last checked: {formatDate(reconciliation.checkedAt)}</div>
+            )}
+          </CardContent>
+        </Card>
+        {reconciliation && reconciliation.mismatches.length > 0 && (
+          <Card className="border-amber-200">
+            <CardHeader className="flex-row items-center gap-2 space-y-0">
+              <AlertTriangle className="h-5 w-5 text-amber-600" />
+              <CardTitle className="text-base">Reconciliation mismatches</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <Table data-testid="reconciliation-mismatches-table">
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Type</TableHead>
+                    <TableHead>Order</TableHead>
+                    <TableHead>Transaction</TableHead>
+                    <TableHead>Refund request</TableHead>
+                    <TableHead>Description</TableHead>
+                    <TableHead>Severity</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {reconciliation.mismatches.map((mismatch, index) => (
+                    <TableRow key={`${mismatch.type}-${mismatch.orderId ?? mismatch.transactionId ?? mismatch.refundRequestId ?? index}`}>
+                      <TableCell className="font-medium">{mismatch.type}</TableCell>
+                      <TableCell>{mismatch.orderId ?? "-"}</TableCell>
+                      <TableCell>{mismatch.transactionId ?? "-"}</TableCell>
+                      <TableCell>{mismatch.refundRequestId ?? "-"}</TableCell>
+                      <TableCell className="min-w-72 whitespace-normal">{mismatchDescription(mismatch)}</TableCell>
+                      <TableCell><MismatchSeverityBadge mismatch={mismatch} /></TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </CardContent>
+          </Card>
+        )}
+      </section>
+
+      <section className="space-y-4" aria-labelledby="fraud-risk-title" data-testid="fraud-risk-evidence-section">
+        <div>
+          <h2 id="fraud-risk-title" className="text-xl font-semibold tracking-tight">Fraud / Risk Evidence</h2>
+          <p className="text-sm text-slate-500">Review risk signals calculated and returned by the backend.</p>
+        </div>
+        {riskEvidenceError && (
+          <div className="rounded-md border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-800">
+            Fraud and risk evidence is not connected: {riskEvidenceError}
+          </div>
+        )}
+        {riskEvidence && riskEvidence.triggeredRules === 0 && (
+          <div className="rounded-md border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700">
+            No risk flags found
+          </div>
+        )}
+        {riskEvidence && riskEvidence.triggeredRules > 0 && (
+          <div className="rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+            {riskEvidence.triggeredRules} risk rule{riskEvidence.triggeredRules === 1 ? "" : "s"} require review.
+          </div>
+        )}
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          {RISK_CARD_CONFIG.flatMap((config) => {
+            const rule = riskEvidence?.rules[config.id];
+            if (riskEvidence && !rule) return [];
+            return [<RiskEvidenceCard key={config.id} config={config} rule={rule} loading={evidenceLoading} />];
+          })}
+        </div>
+        {riskEvidence?.checkedAt && (
+          <div className="text-xs text-slate-400">Last checked: {formatDate(riskEvidence.checkedAt)}</div>
+        )}
+      </section>
+
       <Card className="border-slate-200">
         <CardHeader><CardTitle className="text-base">Receipt signature verification</CardTitle></CardHeader>
         <CardContent className="space-y-3">
@@ -261,6 +390,32 @@ export default function SecurityOps() {
   );
 }
 
+function RiskEvidenceCard({
+  config,
+  rule,
+  loading,
+}: {
+  config: (typeof RISK_CARD_CONFIG)[number];
+  rule?: RiskEvidenceRule;
+  loading: boolean;
+}) {
+  return (
+    <Card className="border-slate-200" data-testid={`risk-${config.id}`}>
+      <CardContent className="space-y-3 p-5">
+        <div className="flex items-start justify-between gap-3">
+          <div className="text-sm font-medium">{config.title}</div>
+          <Shield className="h-4 w-4 shrink-0 text-indigo-600" />
+        </div>
+        <StatusBadge status={loading ? "unchecked" : rule && rule.observedCount > 0 ? "warning" : "unchecked"}>
+          {loading ? "Loading..." : rule ? `${rule.observedCount} observed` : "Not reported"}
+        </StatusBadge>
+        <div className="text-xs text-slate-500">{config.detail}</div>
+        {rule?.threshold !== undefined && <div className="text-xs text-slate-400">Threshold: {rule.threshold}</div>}
+      </CardContent>
+    </Card>
+  );
+}
+
 function HardeningCard({ item, loading }: { item: SecurityHardeningItem; loading: boolean }) {
   const status = loading ? "not_reported" : item.status;
   return (
@@ -280,6 +435,33 @@ function HardeningCard({ item, loading }: { item: SecurityHardeningItem; loading
       </CardContent>
     </Card>
   );
+}
+
+function metricValue(value: number | undefined, loading: boolean): string {
+  if (loading) return "Loading...";
+  return value === undefined ? "-" : String(value);
+}
+
+function mismatchDescription(mismatch: ReconciliationMismatch): string {
+  if (mismatch.description) return mismatch.description;
+  const descriptions: Record<string, string> = {
+    paid_order_without_successful_transaction: "Paid order does not have a successful transaction.",
+    successful_transaction_order_not_paid_or_refunded: "Successful transaction belongs to an order that is not paid or refunded.",
+    succeeded_refund_request_without_provider_refund_id: "Succeeded refund request does not have a provider refund ID.",
+    refunded_order_without_refunded_transaction: "Refunded order does not have a refunded transaction.",
+    duplicate_successful_transaction_for_order: `Order has ${mismatch.occurrenceCount} successful transactions.`,
+  };
+  return descriptions[mismatch.type] ?? "Backend reported a reconciliation mismatch.";
+}
+
+function mismatchSeverity(mismatch: ReconciliationMismatch): string {
+  if (mismatch.severity) return mismatch.severity;
+  return mismatch.type === "duplicate_successful_transaction_for_order" ? "high" : "warning";
+}
+
+function MismatchSeverityBadge({ mismatch }: { mismatch: ReconciliationMismatch }) {
+  const severity = mismatchSeverity(mismatch);
+  return <StatusBadge status={severity === "high" ? "failed" : "warning"}>{severity}</StatusBadge>;
 }
 
 function Metric({ label, value, testId }: { label: string; value: string; testId?: string }) {
