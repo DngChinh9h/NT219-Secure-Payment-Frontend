@@ -1,57 +1,147 @@
-import { useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "../../components/ui/card";
 import { Button } from "../../components/ui/button";
 import { Textarea } from "../../components/ui/textarea";
 import { StatusBadge } from "../../components/StatusBadge";
-import { adminService, receiptService } from "../../services";
-import { Shield, FileCheck2 } from "lucide-react";
+import {
+  adminService,
+  receiptService,
+  SECURITY_EVIDENCE_CONTROLS,
+  type SecurityEvidence,
+  type SecurityEvidenceStatus,
+} from "../../services";
+import { RefreshCw, Shield } from "lucide-react";
 import { toast } from "sonner";
 
-interface CheckResult { name: string; status: "success" | "failed"; actual: string; }
+interface ReceiptResult {
+  valid: boolean;
+  error?: string;
+}
 
 export default function SecurityOps() {
+  const [evidence, setEvidence] = useState<SecurityEvidence[] | null>(null);
+  const [evidenceLoading, setEvidenceLoading] = useState(true);
+  const [evidenceError, setEvidenceError] = useState<string | null>(null);
   const [receipt, setReceipt] = useState("");
-  const [results, setResults] = useState<CheckResult[]>([]);
+  const [receiptResult, setReceiptResult] = useState<ReceiptResult | null>(null);
+  const [receiptLoading, setReceiptLoading] = useState(false);
 
-  const add = (result: CheckResult) => setResults((current) => [result, ...current]);
-  const verifyAudit = async () => {
+  const loadEvidence = useCallback(async () => {
+    setEvidenceLoading(true);
+    setEvidenceError(null);
     try {
-      const result = await adminService.verifyAuditTrail();
-      add({ name: "Audit trail integrity", status: result.valid ? "success" : "failed", actual: result.valid ? `${result.checked} records verified` : `Integrity failure at ${result.failedAt}` });
+      setEvidence(await adminService.getSecurityEvidence());
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Unable to verify audit trail.");
+      setEvidence(null);
+      setEvidenceError(error instanceof Error ? error.message : "Unable to load security evidence.");
+    } finally {
+      setEvidenceLoading(false);
     }
-  };
+  }, []);
+
+  useEffect(() => {
+    void loadEvidence();
+  }, [loadEvidence]);
+
   const verifyReceipt = async () => {
     if (!receipt.trim()) return;
+    setReceiptLoading(true);
+    setReceiptResult(null);
     try {
       const result = await receiptService.verify(receipt.trim());
-      add({ name: "Receipt authenticity", status: result.valid ? "success" : "failed", actual: result.valid ? "Receipt signature is valid" : result.error ?? "Receipt signature is invalid" });
+      setReceiptResult({ valid: result.valid, error: result.error });
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Unable to verify receipt.");
+      const message = error instanceof Error ? error.message : "Unable to verify receipt.";
+      setReceiptResult({ valid: false, error: message });
+      toast.error(message);
+    } finally {
+      setReceiptLoading(false);
     }
   };
+
+  const cards = evidence ?? SECURITY_EVIDENCE_CONTROLS.map((control) => ({
+    id: control.id,
+    title: control.title,
+    status: "not_connected" as const,
+  }));
 
   return (
     <div className="space-y-6">
-      <div><h1 className="text-2xl font-semibold tracking-tight">Security operations</h1><p className="text-sm text-slate-500">Run checks backed by live security endpoints.</p></div>
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-        <Health title="Audit trail integrity" status="connected" />
-        <Health title="Receipt authenticity" status="connected" />
-        <Health title="Provider callback processing" status="not connected" />
-        <Health title="Duplicate payment protection" status="not connected" />
-        <Health title="Refund protection" status="not connected" />
-        <Health title="Access control checks" status="not connected" />
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h1 className="text-2xl font-semibold tracking-tight">Security operations</h1>
+          <p className="text-sm text-slate-500">Inspect evidence returned by live security endpoints.</p>
+        </div>
+        <Button variant="outline" disabled={evidenceLoading} onClick={() => void loadEvidence()}>
+          <RefreshCw className="mr-2 h-4 w-4" />
+          {evidenceLoading ? "Refreshing..." : "Refresh evidence"}
+        </Button>
       </div>
-      <section className="grid gap-5 lg:grid-cols-2">
-        <Card className="border-slate-200"><CardHeader><CardTitle className="text-base">Audit trail integrity</CardTitle></CardHeader><CardContent><Button className="w-full bg-indigo-600 hover:bg-indigo-700" onClick={verifyAudit}><FileCheck2 className="mr-2 h-4 w-4" />Verify audit trail</Button></CardContent></Card>
-        <Card className="border-slate-200"><CardHeader><CardTitle className="text-base">Receipt authenticity</CardTitle></CardHeader><CardContent className="space-y-3"><Textarea rows={4} value={receipt} onChange={(event) => setReceipt(event.target.value)} placeholder="Paste a receipt to verify..." /><Button onClick={verifyReceipt}>Verify receipt</Button></CardContent></Card>
-        <Card className="border-slate-200 lg:col-span-2"><CardHeader><CardTitle className="text-base">Check results</CardTitle></CardHeader><CardContent className="p-0">{results.length === 0 ? <div className="p-8 text-center text-sm text-slate-500">Run a connected check to see results here.</div> : <ul className="divide-y divide-slate-100">{results.map((result, index) => <li key={`${result.name}-${index}`} className="flex items-center justify-between px-4 py-3 text-sm"><div><div className="font-medium">{result.name}</div><div className="text-xs text-slate-500">{result.actual}</div></div><StatusBadge status={result.status} /></li>)}</ul>}</CardContent></Card>
-      </section>
+
+      {evidenceError && (
+        <div className="rounded-md border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-800">
+          Security evidence is not connected: {evidenceError}
+        </div>
+      )}
+
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        {cards.map((item) => <EvidenceCard key={item.id} evidence={item} loading={evidenceLoading} />)}
+      </div>
+
+      <Card className="border-slate-200">
+        <CardHeader><CardTitle className="text-base">Receipt signature verification</CardTitle></CardHeader>
+        <CardContent className="space-y-3">
+          <Textarea
+            rows={5}
+            value={receipt}
+            onChange={(event) => setReceipt(event.target.value)}
+            placeholder="Paste a JWS receipt to verify..."
+          />
+          <Button disabled={receiptLoading || !receipt.trim()} onClick={() => void verifyReceipt()}>
+            {receiptLoading ? "Verifying..." : "Verify receipt"}
+          </Button>
+          {receiptResult && (
+            <div className={`rounded-md border p-3 text-sm ${receiptResult.valid ? "border-emerald-200 bg-emerald-50 text-emerald-800" : "border-rose-200 bg-rose-50 text-rose-800"}`}>
+              <div className="flex items-center justify-between gap-3">
+                <span className="font-medium">{receiptResult.valid ? "Receipt signature is valid." : "Receipt signature is invalid."}</span>
+                <StatusBadge status={receiptResult.valid ? "success" : "failed"} />
+              </div>
+              {receiptResult.error && <div className="mt-1 text-xs">{receiptResult.error}</div>}
+            </div>
+          )}
+        </CardContent>
+      </Card>
     </div>
   );
 }
 
-function Health({ title, status }: { title: string; status: "connected" | "not connected" }) {
-  return <Card className="border-slate-200"><CardContent className="space-y-3 p-5"><div className="flex items-center justify-between"><div className="text-sm font-medium">{title}</div><Shield className="h-4 w-4 text-indigo-600" /></div><StatusBadge status={status === "connected" ? "healthy" : "unchecked"}>{status}</StatusBadge></CardContent></Card>;
+function EvidenceCard({ evidence, loading }: { evidence: SecurityEvidence; loading: boolean }) {
+  const status = loading ? "unknown" : evidence.status;
+  return (
+    <Card className="border-slate-200">
+      <CardContent className="space-y-3 p-5">
+        <div className="flex items-start justify-between gap-3">
+          <div className="text-sm font-medium">{evidence.title}</div>
+          <Shield className="h-4 w-4 shrink-0 text-indigo-600" />
+        </div>
+        <StatusBadge status={badgeTone(status)}>{loading ? "Loading..." : evidenceLabel(status)}</StatusBadge>
+        {evidence.details && <div className="text-xs text-slate-500">{evidence.details}</div>}
+      </CardContent>
+    </Card>
+  );
+}
+
+function badgeTone(status: SecurityEvidenceStatus): string {
+  if (status === "passed") return "healthy";
+  if (status === "failed") return "failed";
+  if (status === "warning") return "warning";
+  return "unchecked";
+}
+
+function evidenceLabel(status: SecurityEvidenceStatus): string {
+  if (status === "passed") return "Passed";
+  if (status === "failed") return "Failed";
+  if (status === "warning") return "Warning";
+  if (status === "not_connected") return "Not connected";
+  return "Unknown";
 }
