@@ -33,4 +33,19 @@ export default defineConfig({
 
   // File types to support raw imports. Never add .css, .tsx, or .ts files to this.
   assetsInclude: ['**/*.svg', '**/*.csv'],
+  server: process.env.VITE_DEV_PROXY_TARGET
+    ? {
+        proxy: {
+          '/api': {
+            target: process.env.VITE_DEV_PROXY_TARGET,
+            changeOrigin: true,
+            configure(proxy) {
+              proxy.on('proxyReq', (proxyRequest) => {
+                proxyRequest.removeHeader('origin')
+              })
+            },
+          },
+        },
+      }
+    : undefined,
 })

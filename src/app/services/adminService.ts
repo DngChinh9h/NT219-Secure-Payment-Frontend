@@ -16,8 +16,16 @@ export interface AuditChainVerification {
   verifiedAt?: string;
 }
 
+export interface ReceiptSigningKeyStatus {
+  activeKeyVersion: number;
+  availableKeyVersions: number[];
+  availablePublicKeyVersions?: number[];
+  keyRotationEnabled: boolean;
+  keyStoreReady?: boolean;
+}
+
 export const SECURITY_EVIDENCE_CONTROLS = [
-  { id: "receipt_signature_verification", aliases: ["receipt_signature", "receipt_verification"], title: "Receipt signature verification" },
+  { id: "receipt_signature_verification", aliases: ["receipt_signature", "receipt_verification", "receipt_signing"], title: "Receipt signature verification" },
   { id: "audit_hash_chain", aliases: ["audit_chain", "audit_trail_integrity"], title: "Audit hash chain" },
   { id: "duplicate_payment_protection", aliases: ["duplicate_payment", "duplicate_payments"], title: "Duplicate payment protection" },
   { id: "replay_protection", aliases: ["payment_replay_protection", "replay_attack_protection"], title: "Replay protection" },
@@ -86,6 +94,12 @@ export const adminService = {
   async getSecurityEvidence() {
     const result = await apiClient.get<unknown>("/api/admin/security/evidence");
     return mapEvidence(result);
+  },
+  async getReceiptSigningKeyStatus() {
+    return apiClient.get<ReceiptSigningKeyStatus>("/api/admin/security/keys/status");
+  },
+  async rotateReceiptSigningKey() {
+    return apiClient.post<ReceiptSigningKeyStatus>("/api/admin/security/keys/rotate");
   },
   async verifySecurityAuditChain(): Promise<AuditChainVerification> {
     const result = await apiClient.get<Record<string, unknown>>("/api/admin/security/audit-chain/verify");
