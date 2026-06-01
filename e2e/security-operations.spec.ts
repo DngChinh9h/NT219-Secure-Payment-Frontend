@@ -59,6 +59,22 @@ async function stubSecurityMetadata(page: Page) {
       keyRotationEnabled: true,
     }),
   );
+  await page.route("**/api/admin/security/hardening", (route) =>
+    fulfillJson(route, {
+      rateLimitEnabled: true,
+      corsRestricted: true,
+      securityHeadersEnabled: true,
+      replayProtectionEnabled: true,
+      duplicatePaymentProtectionEnabled: true,
+      refundDoubleSpendProtectionEnabled: true,
+      webhookIdempotencyEnabled: true,
+      secretScanRecommended: true,
+      attackEvidence: {
+        replayDuplicateBlocked: { blocked: true, details: "Duplicate nonce rejected." },
+        customerCannotAccessAdminApis: { blocked: true, details: "Customer request rejected with 403." },
+      },
+    }),
+  );
 }
 
 async function login(page: Page, email = ADMIN_EMAIL, password = ADMIN_PASSWORD) {
@@ -102,10 +118,12 @@ async function restoreAdminSession(page: Page) {
 
 async function openSecurityOperations(page: Page) {
   const evidenceResponse = apiResponse(page, "GET", "/api/admin/security/evidence");
+  const hardeningResponse = apiResponse(page, "GET", "/api/admin/security/hardening");
   const keyStatusResponse = apiResponse(page, "GET", "/api/admin/security/keys/status");
   await page.goto("/admin/security");
   await expect(page.getByRole("heading", { name: "Security operations" })).toBeVisible();
   await expect((await evidenceResponse).ok()).toBeTruthy();
+  await expect((await hardeningResponse).ok()).toBeTruthy();
   await expect((await keyStatusResponse).ok()).toBeTruthy();
   await expect(page.getByRole("button", { name: "Refresh evidence" })).toBeEnabled();
 }
@@ -126,7 +144,7 @@ async function registerCustomer(request: APIRequestContext) {
   return { email, password };
 }
 
-test.describe.serial("Phase 5 security operations UI", () => {
+test.describe.serial("Phase 6 security operations UI", () => {
   test("admin login loads the operations dashboard and admin navigation", async ({ page }) => {
     await stubBackgroundApis(page);
     await loginAdmin(page);
@@ -144,6 +162,11 @@ test.describe.serial("Phase 5 security operations UI", () => {
     await expect(page.getByText("Key rotation enabled").locator("..")).toContainText("Enabled");
     await expect(page.getByText("Receipt signature verification").first()).toBeVisible();
     await expect(page.getByText("Audit hash chain")).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Security Hardening" })).toBeVisible();
+    await expect(page.getByTestId("hardening-rate_limiting")).toContainText("Enabled");
+    await expect(page.getByTestId("hardening-cors_restriction")).toContainText("Enabled");
+    await expect(page.getByTestId("hardening-security_headers")).toContainText("Enabled");
+    await expect(page.getByTestId("hardening-secret_scan_status")).toContainText("Warning");
   });
 
   test("rotates a signing key and closes the confirmation overlay", async ({ page }) => {
@@ -157,11 +180,13 @@ test.describe.serial("Phase 5 security operations UI", () => {
 
     const rotateResponse = apiResponse(page, "POST", "/api/admin/security/keys/rotate");
     const refreshedEvidence = apiResponse(page, "GET", "/api/admin/security/evidence");
+    const refreshedHardening = apiResponse(page, "GET", "/api/admin/security/hardening");
     const refreshedKeyStatus = apiResponse(page, "GET", "/api/admin/security/keys/status");
     await page.getByRole("button", { name: "Confirm rotation" }).click();
 
     await expect((await rotateResponse).ok()).toBeTruthy();
     await expect((await refreshedEvidence).ok()).toBeTruthy();
+    await expect((await refreshedHardening).ok()).toBeTruthy();
     await expect((await refreshedKeyStatus).ok()).toBeTruthy();
     await expect(page.getByRole("heading", { name: "Rotate receipt signing key?" })).toBeHidden();
     await expect(page.locator('[data-slot="alert-dialog-overlay"]')).toHaveCount(0);
@@ -183,6 +208,9 @@ test.describe.serial("Phase 5 security operations UI", () => {
     await verifyButton.click();
     await expect((await verifyResponse).ok()).toBeTruthy();
     await expect(page.getByText("Receipt signature is invalid.")).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Attack Evidence" })).toBeVisible();
+    await expect(page.getByText("Replay duplicate blocked")).toBeVisible();
+    await expect(page.getByText("Customer cannot access admin APIs")).toBeVisible();
     await expect(page.getByRole("heading", { name: "Security operations" })).toBeVisible();
   });
 
@@ -224,10 +252,19 @@ test.describe.serial("Phase 5 security operations UI", () => {
         }),
       });
     });
+    await page.route("**/api/admin/security/hardening", async (route) => {
+      await route.fulfill({
+        status: 500,
+        contentType: "application/json",
+        body: JSON.stringify({ error: "Synthetic hardening outage" }),
+      });
+    });
 
     await page.goto("/admin/security");
     await expect(page.getByRole("button", { name: "Refreshing..." })).toBeVisible();
     await expect(page.getByText("Security evidence is not connected: Synthetic evidence outage")).toBeVisible();
+    await expect(page.getByText("Security hardening evidence is not connected: Synthetic hardening outage")).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Security Hardening" })).toBeVisible();
     await expect(page.getByRole("heading", { name: "Security operations" })).toBeVisible();
     await expect(page.locator('[data-slot="alert-dialog-overlay"]')).toHaveCount(0);
   });

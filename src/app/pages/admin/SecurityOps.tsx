@@ -17,11 +17,16 @@ import {
   adminService,
   receiptService,
   SECURITY_EVIDENCE_CONTROLS,
+  SECURITY_HARDENING_CONTROLS,
   type ReceiptSigningKeyStatus,
   type SecurityEvidence,
   type SecurityEvidenceStatus,
+  type SecurityHardening,
+  type SecurityHardeningItem,
+  type SecurityHardeningStatus,
 } from "../../services";
-import { KeyRound, RefreshCw, RotateCcw, Shield } from "lucide-react";
+import { KeyRound, RefreshCw, RotateCcw, Shield, ShieldCheck } from "lucide-react";
+import { formatDate } from "../../lib/format";
 import { toast } from "sonner";
 
 interface ReceiptResult {
@@ -31,9 +36,11 @@ interface ReceiptResult {
 
 export default function SecurityOps() {
   const [evidence, setEvidence] = useState<SecurityEvidence[] | null>(null);
+  const [hardening, setHardening] = useState<SecurityHardening | null>(null);
   const [keyStatus, setKeyStatus] = useState<ReceiptSigningKeyStatus | null>(null);
   const [evidenceLoading, setEvidenceLoading] = useState(true);
   const [evidenceError, setEvidenceError] = useState<string | null>(null);
+  const [hardeningError, setHardeningError] = useState<string | null>(null);
   const [keyStatusError, setKeyStatusError] = useState<string | null>(null);
   const [rotateDialogOpen, setRotateDialogOpen] = useState(false);
   const [rotateLoading, setRotateLoading] = useState(false);
@@ -44,10 +51,12 @@ export default function SecurityOps() {
   const loadEvidence = useCallback(async () => {
     setEvidenceLoading(true);
     setEvidenceError(null);
+    setHardeningError(null);
     setKeyStatusError(null);
     try {
-      const [evidenceResult, keyStatusResult] = await Promise.allSettled([
+      const [evidenceResult, hardeningResult, keyStatusResult] = await Promise.allSettled([
         adminService.getSecurityEvidence(),
+        adminService.getSecurityHardening(),
         adminService.getReceiptSigningKeyStatus(),
       ]);
       if (evidenceResult.status === "fulfilled") {
@@ -55,6 +64,12 @@ export default function SecurityOps() {
       } else {
         setEvidence(null);
         setEvidenceError(evidenceResult.reason instanceof Error ? evidenceResult.reason.message : "Unable to load security evidence.");
+      }
+      if (hardeningResult.status === "fulfilled") {
+        setHardening(hardeningResult.value);
+      } else {
+        setHardening(null);
+        setHardeningError(hardeningResult.reason instanceof Error ? hardeningResult.reason.message : "Unable to load security hardening evidence.");
       }
       if (keyStatusResult.status === "fulfilled") {
         setKeyStatus(keyStatusResult.value);
@@ -108,6 +123,12 @@ export default function SecurityOps() {
     id: control.id,
     title: control.title,
     status: "not_connected" as const,
+  }));
+  const hardeningCards = hardening?.controls ?? SECURITY_HARDENING_CONTROLS.map((control) => ({
+    id: control.id,
+    title: control.title,
+    status: "not_reported" as const,
+    details: "No hardening evidence returned by the backend.",
   }));
   const receiptSigningStatus = evidence?.find((item) => item.id === "receipt_signature_verification")?.status;
   const receiptSigningLabel = evidenceLoading
@@ -186,6 +207,33 @@ export default function SecurityOps() {
         {cards.map((item) => <EvidenceCard key={item.id} evidence={item} loading={evidenceLoading} />)}
       </div>
 
+      <section className="space-y-4" aria-labelledby="security-hardening-title">
+        <div>
+          <h2 id="security-hardening-title" className="text-xl font-semibold tracking-tight">Security Hardening</h2>
+          <p className="text-sm text-slate-500">Inspect hardening controls returned by the live admin security API.</p>
+        </div>
+        {hardeningError && (
+          <div className="rounded-md border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-800">
+            Security hardening evidence is not connected: {hardeningError}
+          </div>
+        )}
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          {hardeningCards.map((item) => <HardeningCard key={item.id} item={item} loading={evidenceLoading} />)}
+        </div>
+      </section>
+
+      {hardening && hardening.attackEvidence.length > 0 && (
+        <section className="space-y-4" aria-labelledby="attack-evidence-title">
+          <div>
+            <h2 id="attack-evidence-title" className="text-xl font-semibold tracking-tight">Attack Evidence</h2>
+            <p className="text-sm text-slate-500">Observed attack-blocking results returned by the backend.</p>
+          </div>
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            {hardening.attackEvidence.map((item) => <HardeningCard key={item.id} item={item} loading={evidenceLoading} />)}
+          </div>
+        </section>
+      )}
+
       <Card className="border-slate-200">
         <CardHeader><CardTitle className="text-base">Receipt signature verification</CardTitle></CardHeader>
         <CardContent className="space-y-3">
@@ -213,6 +261,27 @@ export default function SecurityOps() {
   );
 }
 
+function HardeningCard({ item, loading }: { item: SecurityHardeningItem; loading: boolean }) {
+  const status = loading ? "not_reported" : item.status;
+  return (
+    <Card className="border-slate-200" data-testid={`hardening-${item.id}`}>
+      <CardContent className="space-y-3 p-5">
+        <div className="flex items-start justify-between gap-3">
+          <div className="text-sm font-medium">{item.title}</div>
+          <ShieldCheck className="h-4 w-4 shrink-0 text-indigo-600" />
+        </div>
+        <StatusBadge status={hardeningTone(status)}>
+          {loading ? "Loading..." : hardeningLabel(status)}
+        </StatusBadge>
+        <div className="text-xs text-slate-500">{item.details}</div>
+        {item.lastCheckedAt && (
+          <div className="text-[11px] text-slate-400">Last checked: {formatDate(item.lastCheckedAt)}</div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
 function Metric({ label, value, testId }: { label: string; value: string; testId?: string }) {
   return (
     <div className="rounded-md border border-slate-100 bg-slate-50 p-3">
@@ -220,6 +289,20 @@ function Metric({ label, value, testId }: { label: string; value: string; testId
       <div className="mt-1 font-medium" data-testid={testId}>{value}</div>
     </div>
   );
+}
+
+function hardeningTone(status: SecurityHardeningStatus): string {
+  if (status === "enabled") return "healthy";
+  if (status === "disabled") return "failed";
+  if (status === "warning") return "warning";
+  return "unchecked";
+}
+
+function hardeningLabel(status: SecurityHardeningStatus): string {
+  if (status === "enabled") return "Enabled";
+  if (status === "disabled") return "Disabled";
+  if (status === "warning") return "Warning";
+  return "Not reported";
 }
 
 function EvidenceCard({ evidence, loading }: { evidence: SecurityEvidence; loading: boolean }) {
