@@ -8,7 +8,7 @@
     "dev": "vite",
     "e2e:ui": "playwright test",
     "e2e:ui:headed": "playwright test --headed",
-    "e2e:ui:prod": "playwright test"
+    "e2e:ui:prod": "playwright test e2e/production-regression.spec.ts"
   },
   "dependencies": {
     "@emotion/react": "11.14.0",
@@ -42,6 +42,8 @@
     "@radix-ui/react-toggle": "1.1.2",
     "@radix-ui/react-toggle-group": "1.1.2",
     "@radix-ui/react-tooltip": "1.1.8",
+    "@stripe/react-stripe-js": "^6.5.0",
+    "@stripe/stripe-js": "^9.7.0",
     "canvas-confetti": "1.9.4",
     "class-variance-authority": "0.7.1",
     "clsx": "2.1.1",

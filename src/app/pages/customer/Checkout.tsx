@@ -1,5 +1,7 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router";
+import { CardElement, Elements, useElements, useStripe } from "@stripe/react-stripe-js";
+import { loadStripe } from "@stripe/stripe-js";
 import { useApp } from "../../lib/store";
 import { Button } from "../../components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "../../components/ui/card";
@@ -26,10 +28,11 @@ export default function CheckoutPage() {
   const [result, setResult] = useState<PaymentIntentResult | null>(null);
 
   const sandbox = publicConfig.environment === "sandbox";
-  const stripeDevelopmentToken = import.meta.env.DEV && sandbox;
-  const canPay = method === "mock_bank"
-    ? sandbox && publicConfig.providers.mock_bank
-    : publicConfig.providers.stripe && stripeDevelopmentToken;
+  const stripePromise = useMemo(
+    () => publicConfig.stripePublishableKey ? loadStripe(publicConfig.stripePublishableKey) : null,
+    [publicConfig.stripePublishableKey],
+  );
+  const canPayMockBank = sandbox && publicConfig.providers.mock_bank;
 
   useEffect(() => {
     if (!orderId || order) return;
@@ -44,23 +47,22 @@ export default function CheckoutPage() {
     );
   }
 
-  const pay = async () => {
-    if (!canPay) {
-      toast.error(method === "stripe"
-        ? "Stripe Elements is not connected yet. Card payment is unavailable outside the development sandbox."
-        : "Sandbox Bank is not available in the current public configuration.");
+  const showResult = (nextResult: PaymentIntentResult) => {
+    setResult(nextResult);
+    if (nextResult.status === "succeeded") toast.success("Payment completed");
+    else if (nextResult.status === "failed") toast.error("Payment failed. You were not charged.");
+    else toast.message("Payment is being processed");
+  };
+
+  const payMockBank = async () => {
+    if (!canPayMockBank) {
+      toast.error("Sandbox Bank is not available in the current public configuration.");
       return;
     }
-    const paymentToken = method === "stripe"
-      ? "pm_card_visa"
-      : { approve: "mock_success", decline: "mock_failed", pending: "mock_pending" }[sandboxChoice];
+    const paymentToken = { approve: "mock_success", decline: "mock_failed", pending: "mock_pending" }[sandboxChoice];
     setBusy(true);
     try {
-      const nextResult = await payForOrder(order.id, method, paymentToken);
-      setResult(nextResult);
-      if (nextResult.status === "succeeded") toast.success("Payment completed");
-      else if (nextResult.status === "failed") toast.error("Payment failed. You were not charged.");
-      else toast.message("Payment is being processed");
+      showResult(await payForOrder(order.id, "mock_bank", paymentToken));
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Unable to process payment.");
     } finally {
@@ -113,12 +115,20 @@ export default function CheckoutPage() {
                 <div className="mt-5 space-y-3">
                   <div className="text-sm font-medium">Secure card input</div>
                   <div className="rounded-lg border border-slate-200 bg-white p-5">
-                    <div className="flex items-center gap-2 text-sm text-slate-500"><Lock className="h-4 w-4" /> Stripe Elements mount area</div>
-                    <div className="mt-3 rounded-md border border-dashed border-slate-300 bg-slate-50 p-5 text-center text-xs text-slate-500">
-                      Raw card numbers, expiry dates, and CVC values are never collected by this frontend.
-                    </div>
-                    {!stripeDevelopmentToken && (
-                      <div className="mt-3 text-xs text-amber-700">Stripe Elements integration is required before production card payments can be enabled.</div>
+                    <div className="flex items-center gap-2 text-sm text-slate-500"><Lock className="h-4 w-4" /> Stripe secure card field</div>
+                    {stripePromise ? (
+                      <Elements stripe={stripePromise}>
+                        <StripeCardCheckout
+                          disabled={!!result}
+                          orderId={order.id}
+                          amount={order.amount}
+                          onResult={showResult}
+                        />
+                      </Elements>
+                    ) : (
+                      <div className="mt-3 rounded-md border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800">
+                        Card payment is unavailable because the public Stripe key was not returned by the backend.
+                      </div>
                     )}
                   </div>
                 </div>
@@ -153,12 +163,14 @@ export default function CheckoutPage() {
                   Public payment configuration API is not connected yet. Payment providers stay disabled until the backend exposes `/api/config/public`.
                 </div>
               )}
-              <Button disabled={busy || !!result || !canPay} className="mt-6 w-full bg-indigo-600 hover:bg-indigo-700" onClick={pay}>
-                {busy ? "Processing..." : `Pay ${formatVND(order.amount)} securely`}
-              </Button>
-              <div className="mt-2 flex items-center justify-center gap-1.5 text-xs text-slate-500">
-                <ShieldCheck className="h-3.5 w-3.5" /> Backend confirms payment status with the provider.
-              </div>
+              {method === "mock_bank" && (
+                <>
+                  <Button disabled={busy || !!result || !canPayMockBank} className="mt-6 w-full bg-indigo-600 hover:bg-indigo-700" onClick={payMockBank}>
+                    {busy ? "Processing..." : `Pay ${formatVND(order.amount)} securely`}
+                  </Button>
+                  <PaymentSourceOfTruth />
+                </>
+              )}
             </CardContent>
           </Card>
 
@@ -198,6 +210,106 @@ export default function CheckoutPage() {
           </CardContent>
         </Card>
       </div>
+    </div>
+  );
+}
+
+function StripeCardCheckout({
+  amount,
+  disabled,
+  onResult,
+  orderId,
+}: {
+  amount: number;
+  disabled: boolean;
+  onResult: (result: PaymentIntentResult) => void;
+  orderId: string;
+}) {
+  const stripe = useStripe();
+  const elements = useElements();
+  const { payForOrder, syncPayment } = useApp();
+  const [cardComplete, setCardComplete] = useState(false);
+  const [cardError, setCardError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  const pay = async () => {
+    const card = elements?.getElement(CardElement);
+    if (!stripe || !elements || !card || !cardComplete) return;
+
+    setBusy(true);
+    setCardError(null);
+    try {
+      const paymentMethodResult = await stripe.createPaymentMethod({
+        type: "card",
+        card,
+      });
+      if (paymentMethodResult.error || !paymentMethodResult.paymentMethod) {
+        throw new Error(paymentMethodResult.error?.message ?? "Unable to create a secure card payment method.");
+      }
+
+      const created = await payForOrder(orderId, "stripe", paymentMethodResult.paymentMethod.id);
+      let status = created.status;
+
+      if (created.clientSecret && (status === "requires_action" || status === "requires_confirmation")) {
+        const confirmation = await stripe.confirmCardPayment(created.clientSecret);
+        if (confirmation.error) {
+          throw new Error(confirmation.error.message ?? "Stripe could not confirm this card payment.");
+        }
+        status = confirmation.paymentIntent?.status ?? status;
+      }
+
+      const synced = await syncPayment(created.paymentIntentId);
+      onResult({
+        ...created,
+        status: String(synced.providerStatus ?? status),
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Unable to process payment.";
+      setCardError(message);
+      toast.error(message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <>
+      <div className="mt-3 rounded-md border border-slate-300 bg-slate-50 p-4" data-testid="stripe-card-element">
+        <CardElement
+          options={{
+            hidePostalCode: true,
+            style: {
+              base: {
+                color: "#0f172a",
+                fontFamily: "system-ui, sans-serif",
+                fontSize: "16px",
+                "::placeholder": { color: "#94a3b8" },
+              },
+              invalid: { color: "#be123c" },
+            },
+          }}
+          onChange={(event) => {
+            setCardComplete(event.complete);
+            setCardError(event.error?.message ?? null);
+          }}
+        />
+      </div>
+      <div className="mt-3 text-xs text-slate-500">
+        Card number, expiry date, and CVC are collected securely by Stripe.js and never sent to the SecurePay backend.
+      </div>
+      {cardError && <div className="mt-3 text-xs text-rose-700">{cardError}</div>}
+      <Button disabled={busy || disabled || !stripe || !elements || !cardComplete} className="mt-6 w-full bg-indigo-600 hover:bg-indigo-700" onClick={() => void pay()}>
+        {busy ? "Processing..." : `Pay ${formatVND(amount)} securely`}
+      </Button>
+      <PaymentSourceOfTruth />
+    </>
+  );
+}
+
+function PaymentSourceOfTruth() {
+  return (
+    <div className="mt-2 flex items-center justify-center gap-1.5 text-xs text-slate-500">
+      <ShieldCheck className="h-3.5 w-3.5" /> Backend confirms payment status with the provider.
     </div>
   );
 }
