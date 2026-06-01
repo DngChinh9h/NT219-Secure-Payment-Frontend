@@ -39,6 +39,47 @@ export interface SecurityHardening {
   attackEvidence: SecurityHardeningItem[];
 }
 
+export interface AdminOrder {
+  id: string;
+  customerEmail: string;
+  amount: number;
+  status: string;
+  provider?: string;
+  createdAt: string;
+  updatedAt: string;
+  transactionCount: number;
+  refundStatus?: string;
+}
+
+export interface AdminTransaction {
+  id: string;
+  orderId: string;
+  customerEmail: string;
+  provider?: string;
+  providerPaymentId?: string;
+  amount: number;
+  status: string;
+  refundId?: string;
+  refundedAt?: string;
+  createdAt: string;
+}
+
+export interface AdminProviderEvent {
+  id: string;
+  provider: string;
+  eventType: string;
+  providerEventId: string;
+  relatedPaymentIntentId?: string;
+  status: string;
+  receivedAt: string;
+  processedAt?: string;
+}
+
+export interface AdminProviderEventsResult {
+  items: AdminProviderEvent[];
+  message?: string;
+}
+
 export const SECURITY_EVIDENCE_CONTROLS = [
   { id: "receipt_signature_verification", aliases: ["receipt_signature", "receipt_verification", "receipt_signing"], title: "Receipt signature verification" },
   { id: "audit_hash_chain", aliases: ["audit_chain", "audit_trail_integrity"], title: "Audit hash chain" },
@@ -211,6 +252,51 @@ function mapEvidence(raw: unknown): SecurityEvidence[] {
 }
 
 export const adminService = {
+  async getOrders(): Promise<AdminOrder[]> {
+    const result = await apiClient.get<{ items: Record<string, any>[] }>("/api/admin/orders");
+    return result.items.map((item) => ({
+      id: item.id,
+      customerEmail: item.customerEmail ?? item.customer_email ?? "",
+      amount: Number(item.totalAmount ?? item.total_amount ?? item.amount ?? 0),
+      status: String(item.status ?? "unknown"),
+      provider: item.provider ? String(item.provider) : undefined,
+      createdAt: item.createdAt ?? item.created_at,
+      updatedAt: item.updatedAt ?? item.updated_at ?? item.createdAt ?? item.created_at,
+      transactionCount: Number(item.transactionCount ?? item.transaction_count ?? 0),
+      refundStatus: item.refundStatus ?? item.refund_status ?? undefined,
+    }));
+  },
+  async getTransactions(): Promise<AdminTransaction[]> {
+    const result = await apiClient.get<{ items: Record<string, any>[] }>("/api/admin/transactions");
+    return result.items.map((item) => ({
+      id: item.id,
+      orderId: item.orderId ?? item.order_id,
+      customerEmail: item.customerEmail ?? item.customer_email ?? "",
+      provider: item.provider ? String(item.provider) : undefined,
+      providerPaymentId: item.providerPaymentId ?? item.provider_payment_id ?? undefined,
+      amount: Number(item.amount ?? 0),
+      status: String(item.status ?? "unknown"),
+      refundId: item.refundId ?? item.refund_id ?? undefined,
+      refundedAt: item.refundedAt ?? item.refunded_at ?? undefined,
+      createdAt: item.createdAt ?? item.created_at,
+    }));
+  },
+  async getProviderEvents(): Promise<AdminProviderEventsResult> {
+    const result = await apiClient.get<{ items: Record<string, any>[]; message?: string }>("/api/admin/provider-events");
+    return {
+      message: result.message,
+      items: result.items.map((item) => ({
+        id: item.id,
+        provider: String(item.provider ?? "unknown"),
+        eventType: String(item.eventType ?? item.event_type ?? "unknown"),
+        providerEventId: String(item.providerEventId ?? item.provider_event_id ?? ""),
+        relatedPaymentIntentId: item.relatedPaymentIntentId ?? item.provider_payment_id ?? undefined,
+        status: String(item.status ?? item.processing_status ?? "unknown"),
+        receivedAt: item.receivedAt ?? item.received_at,
+        processedAt: item.processedAt ?? item.processed_at ?? undefined,
+      })),
+    };
+  },
   async listAuditLogs() {
     const result = await apiClient.get<{ logs: Record<string, any>[] }>("/api/transactions/audit-logs");
     return result.logs;

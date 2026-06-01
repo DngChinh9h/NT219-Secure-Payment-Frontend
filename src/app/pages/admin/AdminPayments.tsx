@@ -30,7 +30,7 @@ export default function AdminPayments() {
 
   return (
     <div className="space-y-5">
-      <div><h1 className="text-2xl font-semibold tracking-tight">Payments</h1><p className="text-sm text-slate-500">Sync a payment against the provider using its payment intent ID.</p></div>
+      <div><h1 className="text-2xl font-semibold tracking-tight">Payments</h1><p className="text-sm text-slate-500">This page is for manual provider sync by payment intent ID.</p></div>
       <Card className="border-slate-200">
         <CardHeader><CardTitle className="text-base">Provider sync</CardTitle></CardHeader>
         <CardContent className="space-y-3">

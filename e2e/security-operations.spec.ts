@@ -77,6 +77,17 @@ async function stubSecurityMetadata(page: Page) {
   );
 }
 
+async function stubAdminOperationApis(page: Page) {
+  await page.route("**/api/admin/orders", (route) => fulfillJson(route, { items: [] }));
+  await page.route("**/api/admin/transactions", (route) => fulfillJson(route, { items: [] }));
+  await page.route("**/api/admin/provider-events", (route) =>
+    fulfillJson(route, {
+      items: [],
+      message: "Provider event persistence is not enabled yet",
+    }),
+  );
+}
+
 async function login(page: Page, email = ADMIN_EMAIL, password = ADMIN_PASSWORD) {
   await page.goto("/login");
   await page.getByLabel("Email").fill(email);
@@ -189,6 +200,35 @@ test.describe.serial("Phase 7 deployment readiness UI", () => {
     await expect(page.getByTestId("hardening-secret_scan_status")).toContainText("Warning");
   });
 
+  test("admin operation pages call APIs and render real empty states without placeholders", async ({ page }) => {
+    await stubBackgroundApis(page);
+    await stubAdminOperationApis(page);
+    await restoreAdminSession(page);
+
+    const ordersResponse = apiResponse(page, "GET", "/api/admin/orders");
+    await page.goto("/admin/orders");
+    await expect((await ordersResponse).ok()).toBeTruthy();
+    await expect(page.getByTestId("admin-orders-table")).toBeVisible();
+    await expect(page.getByText("No orders returned by the API.")).toBeVisible();
+
+    const transactionsResponse = apiResponse(page, "GET", "/api/admin/transactions");
+    await page.goto("/admin/transactions");
+    await expect((await transactionsResponse).ok()).toBeTruthy();
+    await expect(page.getByTestId("admin-transactions-table")).toBeVisible();
+    await expect(page.getByText("No transactions returned by the API.")).toBeVisible();
+
+    const eventsResponse = apiResponse(page, "GET", "/api/admin/provider-events");
+    await page.goto("/admin/events");
+    await expect((await eventsResponse).ok()).toBeTruthy();
+    await expect(page.getByTestId("admin-provider-events-table")).toBeVisible();
+    await expect(page.getByText("Provider event persistence is not enabled yet").first()).toBeVisible();
+
+    await expect(page.getByText(/API is not connected yet\./i)).toHaveCount(0);
+
+    await page.goto("/admin/payments");
+    await expect(page.getByText("This page is for manual provider sync by payment intent ID.")).toBeVisible();
+  });
+
   test("rotates a signing key and closes the confirmation overlay", async ({ page }) => {
     await stubBackgroundApis(page);
     await restoreAdminSession(page);
@@ -245,9 +285,10 @@ test.describe.serial("Phase 7 deployment readiness UI", () => {
     await login(page, customer.email, customer.password);
     await expect(page).toHaveURL(/\/shop$/);
     await expect(page.getByRole("link", { name: "Security Operations" })).toHaveCount(0);
-    await page.goto("/admin/security");
-
-    await expect(page.getByRole("heading", { name: "Access restricted" })).toBeVisible();
+    for (const path of ["/admin/security", "/admin/orders", "/admin/transactions", "/admin/events"]) {
+      await page.goto(path);
+      await expect(page.getByRole("heading", { name: "Access restricted" })).toBeVisible();
+    }
     await expect(page.getByRole("button", { name: "Rotate key" })).toHaveCount(0);
   });
 
