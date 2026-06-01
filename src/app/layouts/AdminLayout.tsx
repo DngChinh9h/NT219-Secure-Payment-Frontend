@@ -24,8 +24,8 @@ const NAV = [
 export default function AdminLayout() {
   const navigate = useNavigate();
   const { user, logout } = useApp();
-  const name = user?.fullName ?? "Admin";
-  const email = user?.email ?? "admin@securepay.io";
+  const name = user?.fullName ?? user?.email ?? "Admin";
+  const email = user?.email ?? "";
 
   return (
     <div className="min-h-screen bg-slate-100 text-slate-900">

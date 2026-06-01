@@ -22,6 +22,10 @@ function clearStoredSession() {
 }
 
 async function request<T>(path: string, options: RequestOptions = {}): Promise<T> {
+  if (!API_BASE_URL) {
+    throw new ApiError(0, "SecurePay API base URL is not configured.");
+  }
+
   const token = localStorage.getItem(TOKEN_KEY);
   const headers = new Headers(options.headers);
   headers.set("Accept", "application/json");

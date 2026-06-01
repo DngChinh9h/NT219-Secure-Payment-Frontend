@@ -144,10 +144,30 @@ async function registerCustomer(request: APIRequestContext) {
   return { email, password };
 }
 
-test.describe.serial("Phase 6 security operations UI", () => {
+test.describe.serial("Phase 7 deployment readiness UI", () => {
+  test("public config loads from the backend and direct SPA routes render", async ({ page }) => {
+    const publicConfigResponse = apiResponse(page, "GET", "/api/config/public");
+    await page.goto("/login");
+    await expect((await publicConfigResponse).ok()).toBeTruthy();
+
+    await page.route("**/api/config/public", (route) =>
+      fulfillJson(route, {
+        environment: "production",
+        providers: { stripe: true, mock_bank: true },
+      }),
+    );
+    await page.goto("/shop");
+    await expect(page.getByRole("heading", { name: "Shop with confidence. Pay with peace of mind." })).toBeVisible();
+    await page.goto("/orders");
+    await expect(page).toHaveURL(/\/login$/);
+    await expect(page.getByRole("heading", { name: "Sign in to SecurePay" })).toBeVisible();
+  });
+
   test("admin login loads the operations dashboard and admin navigation", async ({ page }) => {
     await stubBackgroundApis(page);
     await loginAdmin(page);
+    await page.goto("/admin/refunds");
+    await expect(page.getByRole("heading", { name: "Refunds" })).toBeVisible();
     await captureAdminSession(page);
   });
 
@@ -224,6 +244,7 @@ test.describe.serial("Phase 6 security operations UI", () => {
     const customer = await registerCustomer(request);
     await login(page, customer.email, customer.password);
     await expect(page).toHaveURL(/\/shop$/);
+    await expect(page.getByRole("link", { name: "Security Operations" })).toHaveCount(0);
     await page.goto("/admin/security");
 
     await expect(page.getByRole("heading", { name: "Access restricted" })).toBeVisible();
@@ -267,5 +288,49 @@ test.describe.serial("Phase 6 security operations UI", () => {
     await expect(page.getByRole("heading", { name: "Security Hardening" })).toBeVisible();
     await expect(page.getByRole("heading", { name: "Security operations" })).toBeVisible();
     await expect(page.locator('[data-slot="alert-dialog-overlay"]')).toHaveCount(0);
+  });
+
+  test("expired token redirects to login", async ({ page }) => {
+    await stubBackgroundApis(page);
+    await restoreAdminSession(page);
+    await page.route("**/api/admin/security/evidence", (route) =>
+      route.fulfill({
+        status: 401,
+        contentType: "application/json",
+        body: JSON.stringify({ error: "Token expired" }),
+      }),
+    );
+    await page.route("**/api/admin/security/hardening", (route) =>
+      fulfillJson(route, {}),
+    );
+    await page.route("**/api/admin/security/keys/status", (route) =>
+      fulfillJson(route, {
+        activeKeyVersion: 1,
+        availableKeyVersions: [1],
+        keyRotationEnabled: false,
+      }),
+    );
+
+    await page.goto("/admin/security");
+    await expect(page).toHaveURL(/\/login$/);
+    await expect(page.getByRole("heading", { name: "Sign in to SecurePay" })).toBeVisible();
+  });
+
+  test("unreachable backend shows a clean login error without a blank screen", async ({ page }) => {
+    await page.route("**/api/config/public", (route) =>
+      fulfillJson(route, {
+        environment: "production",
+        providers: { stripe: false, mock_bank: false },
+      }),
+    );
+    await page.route("**/api/auth/login", (route) => route.abort("failed"));
+
+    await page.goto("/login");
+    await page.getByLabel("Email").fill(ADMIN_EMAIL);
+    await page.getByLabel("Password").fill(ADMIN_PASSWORD);
+    await page.getByRole("button", { name: "Sign in" }).click();
+
+    await expect(page.getByText("Unable to reach the SecurePay API.")).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Sign in to SecurePay" })).toBeVisible();
   });
 });
