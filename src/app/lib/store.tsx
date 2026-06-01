@@ -13,7 +13,6 @@ import type {
 } from "./types";
 import {
   adminService,
-  ApiError,
   authService,
   configService,
   orderService,
@@ -21,6 +20,7 @@ import {
   receiptService,
   refundService,
   transactionService,
+  type MockRefundOutcome,
   type PaymentIntentResult,
   type PublicConfig,
 } from "../services";
@@ -44,6 +44,8 @@ interface AppState {
   providerEvents: ProviderEvent[];
   auditLogs: AuditLog[];
   refundRequests: RefundRequest[];
+  refundRequestsLoading: boolean;
+  refundRequestsError: string | null;
   publicConfig: PublicConfig;
   dataLoading: boolean;
   apiError: string | null;
@@ -52,6 +54,7 @@ interface AppState {
   register: (data: RegisterInput) => Promise<User>;
   logout: () => void;
   refreshData: () => Promise<void>;
+  refreshRefundRequests: () => Promise<RefundRequest[]>;
   loadOrder: (orderId: string) => Promise<Order>;
 
   addToCart: (productId: string, quantity?: number) => void;
@@ -65,10 +68,10 @@ interface AppState {
   verifyReceiptForTransaction: (transactionId: string) => Promise<{ valid: boolean; payload?: Record<string, unknown>; error?: string }>;
   refundTransaction: (transactionId: string, reason: string) => Promise<Record<string, any>>;
 
-  submitRefundRequest: (input: { orderId: string; reason: string; details?: string }) => never;
-  cancelRefundRequest: (id: string) => never;
-  approveRefundRequest: (id: string) => never;
-  rejectRefundRequest: (id: string, rejectionReason: string, internalNote?: string) => never;
+  submitRefundRequest: (input: { orderId: string; reason: string; details?: string }) => Promise<RefundRequest>;
+  cancelRefundRequest: (id: string) => Promise<RefundRequest>;
+  approveRefundRequest: (id: string, mockRefundOutcome?: MockRefundOutcome) => Promise<RefundRequest>;
+  rejectRefundRequest: (id: string, adminNote: string) => Promise<RefundRequest>;
 }
 
 const DEFAULT_CONFIG: PublicConfig = {
@@ -106,6 +109,10 @@ function linkTransactions(orders: Order[], transactions: Transaction[]): Order[]
   });
 }
 
+function upsertRefundRequest(requests: RefundRequest[], request: RefundRequest): RefundRequest[] {
+  return [request, ...requests.filter((candidate) => candidate.id !== request.id)];
+}
+
 export function AppProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(() => authService.getStoredUser());
   const [cart, setCart] = useState<CartItem[]>([]);
@@ -115,7 +122,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [receipts, setReceipts] = useState<Receipt[]>([]);
   const [providerEvents] = useState<ProviderEvent[]>([]);
   const [auditLogs, setAuditLogs] = useState<AuditLog[]>([]);
-  const [refundRequests] = useState<RefundRequest[]>([]);
+  const [refundRequests, setRefundRequests] = useState<RefundRequest[]>([]);
+  const [refundRequestsLoading, setRefundRequestsLoading] = useState(false);
+  const [refundRequestsError, setRefundRequestsError] = useState<string | null>(null);
   const [publicConfig, setPublicConfig] = useState<PublicConfig>(DEFAULT_CONFIG);
   const [dataLoading, setDataLoading] = useState(false);
   const [apiError, setApiError] = useState<string | null>(null);
@@ -154,15 +163,41 @@ export function AppProvider({ children }: { children: ReactNode }) {
     }
   }, [user]);
 
+  const refreshRefundRequests = useCallback(async () => {
+    if (!authService.getToken() || !user) {
+      setRefundRequests([]);
+      return [];
+    }
+    setRefundRequestsLoading(true);
+    setRefundRequestsError(null);
+    try {
+      const requests = user.role === "admin"
+        ? await refundService.adminListRefundRequests()
+        : await refundService.listMyRefundRequests();
+      setRefundRequests(requests);
+      return requests;
+    } catch (error) {
+      setRefundRequestsError(errorMessage(error));
+      return [];
+    } finally {
+      setRefundRequestsLoading(false);
+    }
+  }, [user]);
+
   useEffect(() => {
-    if (user) void refreshData();
+    if (user) {
+      void refreshData();
+      void refreshRefundRequests();
+    }
     else {
       setOrders([]);
       setTransactions([]);
       setReceipts([]);
       setAuditLogs([]);
+      setRefundRequests([]);
+      setRefundRequestsError(null);
     }
-  }, [user, refreshData]);
+  }, [user, refreshData, refreshRefundRequests]);
 
   const login = useCallback(async (email: string, password: string) => {
     const nextUser = await authService.login(email, password);
@@ -256,26 +291,54 @@ export function AppProvider({ children }: { children: ReactNode }) {
     return result;
   }, [refreshData]);
 
-  const unsupportedRefundRequest = useCallback((): never => {
-    throw new ApiError(501, "Refund request API is not connected yet.");
-  }, []);
+  const submitRefundRequest = useCallback(async (input: { orderId: string; reason: string; details?: string }) => {
+    const request = await refundService.createRefundRequest(input.orderId, input.reason, input.details);
+    setRefundRequests((current) => upsertRefundRequest(current, request));
+    await refreshRefundRequests();
+    return request;
+  }, [refreshRefundRequests]);
+
+  const cancelRefundRequest = useCallback(async (id: string) => {
+    const request = await refundService.cancelRefundRequest(id);
+    setRefundRequests((current) => upsertRefundRequest(current, request));
+    await refreshRefundRequests();
+    return request;
+  }, [refreshRefundRequests]);
+
+  const approveRefundRequest = useCallback(async (id: string, mockRefundOutcome?: MockRefundOutcome) => {
+    try {
+      const response = await refundService.adminApproveRefundRequest(id, mockRefundOutcome);
+      const requests = await refreshRefundRequests();
+      return requests.find((candidate) => candidate.id === id) ?? response;
+    } catch (error) {
+      const requests = await refreshRefundRequests();
+      const request = requests.find((candidate) => candidate.id === id);
+      if (request?.status === "provider_failed") return request;
+      throw error;
+    }
+  }, [refreshRefundRequests]);
+
+  const rejectRefundRequest = useCallback(async (id: string, adminNote: string) => {
+    const request = await refundService.adminRejectRefundRequest(id, adminNote);
+    setRefundRequests((current) => upsertRefundRequest(current, request));
+    await refreshRefundRequests();
+    return request;
+  }, [refreshRefundRequests]);
 
   const value = useMemo<AppState>(() => ({
     user, cart, products, orders, transactions, receipts, providerEvents, auditLogs, refundRequests,
-    publicConfig, dataLoading, apiError,
-    login, register, logout, refreshData, loadOrder,
+    publicConfig, dataLoading, apiError, refundRequestsLoading, refundRequestsError,
+    login, register, logout, refreshData, refreshRefundRequests, loadOrder,
     addToCart, updateCartQty, removeFromCart, clearCart, createOrderFromCart,
     payForOrder, syncPayment, verifyReceiptForTransaction, refundTransaction,
-    submitRefundRequest: unsupportedRefundRequest,
-    cancelRefundRequest: unsupportedRefundRequest,
-    approveRefundRequest: unsupportedRefundRequest,
-    rejectRefundRequest: unsupportedRefundRequest,
+    submitRefundRequest, cancelRefundRequest, approveRefundRequest, rejectRefundRequest,
   }), [
     user, cart, products, orders, transactions, receipts, providerEvents, auditLogs, refundRequests,
-    publicConfig, dataLoading, apiError,
-    login, register, logout, refreshData, loadOrder,
+    publicConfig, dataLoading, apiError, refundRequestsLoading, refundRequestsError,
+    login, register, logout, refreshData, refreshRefundRequests, loadOrder,
     addToCart, updateCartQty, removeFromCart, clearCart, createOrderFromCart,
-    payForOrder, syncPayment, verifyReceiptForTransaction, refundTransaction, unsupportedRefundRequest,
+    payForOrder, syncPayment, verifyReceiptForTransaction, refundTransaction,
+    submitRefundRequest, cancelRefundRequest, approveRefundRequest, rejectRefundRequest,
   ]);
 
   return <AppContext.Provider value={value}>{children}</AppContext.Provider>;

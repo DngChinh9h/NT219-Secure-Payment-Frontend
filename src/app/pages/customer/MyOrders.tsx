@@ -25,7 +25,7 @@ const FILTERS = [
 type Verification = "authentic" | "invalid" | "unknown" | null;
 
 export default function MyOrders() {
-  const { orders, transactions, receipts, refundRequests, verifyReceiptForTransaction, dataLoading, apiError } = useApp();
+  const { orders, transactions, receipts, refundRequests, refundRequestsLoading, verifyReceiptForTransaction, dataLoading, apiError } = useApp();
   const navigate = useNavigate();
   const [filter, setFilter] = useState("all");
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -239,7 +239,11 @@ export default function MyOrders() {
                       <Row label="Refunded at" value={(selectedRefundReq?.refundedAt ?? txn?.refundedAt) ? formatDate((selectedRefundReq?.refundedAt ?? txn!.refundedAt)!) : "—"} />
                       <Row label="Refund reason" value={selectedRefundReq?.reason ?? txn?.refundReason ?? "—"} />
                     </div>
-                  ) : selectedRefundReq && (selectedRefundReq.status === "pending_review" || selectedRefundReq.status === "approved_processing") ? (
+                  ) : refundRequestsLoading ? (
+                    <div className="rounded-md border border-dashed border-slate-200 bg-slate-50 p-4 text-slate-500">
+                      Loading refund eligibility...
+                    </div>
+                  ) : selectedRefundReq && (selectedRefundReq.status === "pending_review" || selectedRefundReq.status === "approved_processing" || selectedRefundReq.status === "provider_pending" || selectedRefundReq.status === "succeeded") ? (
                     <div className="space-y-3 rounded-md border border-amber-200 bg-amber-50 p-4 text-amber-900">
                       <Row label="Refund request status" value={<StatusBadge status={selectedRefundReq.status} />} />
                       <Row label="Submitted at" value={formatDate(selectedRefundReq.submittedAt)} />

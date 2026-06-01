@@ -96,17 +96,21 @@ export interface AuditLog {
 export type RefundRequestStatus =
   | "pending_review"
   | "approved_processing"
-  | "refunded"
+  | "provider_pending"
+  | "succeeded"
   | "rejected"
   | "provider_failed"
-  | "cancelled";
+  | "cancelled"
+  | "unknown";
 
 export interface RefundRequest {
   id: string;
   orderId: string;
   transactionId?: string;
-  customerEmail: string;
+  customerId?: string;
+  customerEmail?: string;
   amount: number;
+  provider?: PaymentProvider;
   reason: string;
   details?: string;
   status: RefundRequestStatus;

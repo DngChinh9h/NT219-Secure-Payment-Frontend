@@ -7,6 +7,7 @@ import { StatusBadge } from "./StatusBadge";
 import { formatDate, formatVND, shortId } from "../lib/format";
 import { toast } from "sonner";
 import { useApp } from "../lib/store";
+import { ApiError } from "../services";
 import type { Order, Transaction } from "../lib/types";
 
 const REASONS = [
@@ -29,11 +30,13 @@ export function RequestRefundDialog({
   const { transactions, refundRequests, submitRefundRequest } = useApp();
   const [reason, setReason] = useState(REASONS[0]);
   const [details, setDetails] = useState("");
+  const [busy, setBusy] = useState(false);
 
   useEffect(() => {
     if (open) {
       setReason(REASONS[0]);
       setDetails("");
+      setBusy(false);
     }
   }, [open]);
 
@@ -42,18 +45,24 @@ export function RequestRefundDialog({
     ? transactions.find((t) => t.id === order.transactionId)
     : undefined;
   const existing = refundRequests.find(
-    (r) => r.orderId === order.id && r.status === "pending_review",
+    (r) => r.orderId === order.id
+      && (r.status === "pending_review" || r.status === "approved_processing" || r.status === "provider_pending" || r.status === "succeeded"),
   );
 
-  const submit = () => {
+  const submit = async () => {
     if (existing) {
-      toast.error("A refund request for this order is already under review.");
+      toast.error("A refund request for this order is already active.");
       return;
     }
     try {
-      submitRefundRequest({ orderId: order.id, reason, details: details.trim() || undefined });
+      setBusy(true);
+      await submitRefundRequest({ orderId: order.id, reason, details: details.trim() || undefined });
+      toast.success("Refund request submitted for review.");
+      onOpenChange(false);
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Refund request API is not connected yet.");
+      toast.error(refundRequestErrorMessage(error));
+    } finally {
+      setBusy(false);
     }
   };
 
@@ -84,7 +93,7 @@ export function RequestRefundDialog({
 
         {existing && (
           <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
-            A refund request for this order is already under review.
+            A refund request for this order is already active.
           </div>
         )}
 
@@ -111,13 +120,23 @@ export function RequestRefundDialog({
 
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
-          <Button className="bg-indigo-600 hover:bg-indigo-700" disabled={!!existing} onClick={submit}>
-            Submit request
+          <Button className="bg-indigo-600 hover:bg-indigo-700" disabled={!!existing || busy} onClick={submit}>
+            {busy ? "Submitting..." : "Submit request"}
           </Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
   );
+}
+
+function refundRequestErrorMessage(error: unknown): string {
+  if (error instanceof ApiError && error.status === 409 && /active refund request/i.test(error.message)) {
+    return "A refund request for this order is already active.";
+  }
+  if (error instanceof ApiError && error.status === 409 && /only paid orders/i.test(error.message)) {
+    return "Only paid orders can request a refund.";
+  }
+  return error instanceof Error ? error.message : "Unable to submit refund request.";
 }
 
 function Row({ label, value }: { label: string; value: React.ReactNode }) {

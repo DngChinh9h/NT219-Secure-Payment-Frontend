@@ -12,21 +12,45 @@ import type { Order, RefundRequest } from "../../lib/types";
 import { Inbox, CheckCircle2, Clock, XCircle, AlertTriangle } from "lucide-react";
 
 export default function RefundRequests() {
-  const { orders, transactions, refundRequests, cancelRefundRequest } = useApp();
+  const {
+    orders,
+    transactions,
+    refundRequests,
+    cancelRefundRequest,
+    dataLoading,
+    refundRequestsLoading,
+    refundRequestsError,
+  } = useApp();
   const [requestOrder, setRequestOrder] = useState<Order | null>(null);
-  const [selected, setSelected] = useState<RefundRequest | null>(null);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [cancellingId, setCancellingId] = useState<string | null>(null);
 
   const eligible = useMemo(() => {
     return orders.filter((o) => {
       if (o.status !== "paid") return false;
       const hasPending = refundRequests.some(
-        (r) => r.orderId === o.id && (r.status === "pending_review" || r.status === "approved_processing" || r.status === "refunded"),
+        (r) => r.orderId === o.id
+          && (r.status === "pending_review" || r.status === "approved_processing" || r.status === "provider_pending" || r.status === "succeeded"),
       );
       return !hasPending;
     });
   }, [orders, refundRequests]);
 
   const mine = refundRequests;
+  const selected = selectedId ? refundRequests.find((request) => request.id === selectedId) ?? null : null;
+
+  const cancel = async (id: string, closeSheet = false) => {
+    setCancellingId(id);
+    try {
+      await cancelRefundRequest(id);
+      toast.success("Refund request cancelled.");
+      if (closeSheet) setSelectedId(null);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Unable to cancel refund request.");
+    } finally {
+      setCancellingId(null);
+    }
+  };
 
   return (
     <div className="space-y-6">
@@ -34,9 +58,11 @@ export default function RefundRequests() {
         <h1 className="text-2xl font-semibold tracking-tight">Refund Requests</h1>
         <p className="text-sm text-slate-500">Request and track refunds for eligible paid orders.</p>
       </div>
-      <div className="rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
-        Refund request API is not connected yet. Submissions are not persisted until the backend exposes a refund-request workflow.
-      </div>
+      {refundRequestsError && (
+        <div className="rounded-md border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-800">
+          Unable to load refund requests: {refundRequestsError}
+        </div>
+      )}
 
       <Card className="border-slate-200">
         <CardHeader className="flex flex-row items-center justify-between gap-3">
@@ -44,7 +70,9 @@ export default function RefundRequests() {
           <span className="text-xs text-slate-500">{eligible.length} order(s)</span>
         </CardHeader>
         <CardContent className="p-0">
-          {eligible.length === 0 ? (
+          {dataLoading || refundRequestsLoading ? (
+            <div className="px-6 py-10 text-center text-sm text-slate-500">Loading eligible orders...</div>
+          ) : eligible.length === 0 ? (
             <div className="flex flex-col items-center gap-2 px-6 py-10 text-center text-sm text-slate-500">
               <Inbox className="h-6 w-6 text-slate-400" />
               No orders are currently eligible for refund.
@@ -92,7 +120,9 @@ export default function RefundRequests() {
           <CardTitle className="text-base">My refund requests</CardTitle>
         </CardHeader>
         <CardContent className="p-0">
-          {mine.length === 0 ? (
+          {refundRequestsLoading ? (
+            <div className="px-6 py-10 text-center text-sm text-slate-500">Loading refund requests...</div>
+          ) : mine.length === 0 ? (
             <div className="px-6 py-10 text-center text-sm text-slate-500">
               You haven't submitted any refund requests yet.
             </div>
@@ -121,18 +151,16 @@ export default function RefundRequests() {
                     <TableCell className="text-sm">{formatDate(r.submittedAt)}</TableCell>
                     <TableCell className="text-sm">{formatDate(r.updatedAt)}</TableCell>
                     <TableCell className="text-right">
-                      <Button variant="ghost" size="sm" onClick={() => setSelected(r)}>View</Button>
+                      <Button variant="ghost" size="sm" onClick={() => setSelectedId(r.id)}>View</Button>
                       {r.status === "pending_review" && (
                         <Button
                           variant="ghost"
                           size="sm"
                           className="ml-1 text-rose-600 hover:text-rose-700"
-                          onClick={() => {
-                            cancelRefundRequest(r.id);
-                            toast.success("Refund request cancelled.");
-                          }}
+                          disabled={cancellingId === r.id}
+                          onClick={() => void cancel(r.id)}
                         >
-                          Cancel
+                          {cancellingId === r.id ? "Cancelling..." : "Cancel"}
                         </Button>
                       )}
                     </TableCell>
@@ -152,7 +180,7 @@ export default function RefundRequests() {
         />
       )}
 
-      <Sheet open={!!selected} onOpenChange={(o) => !o && setSelected(null)}>
+      <Sheet open={!!selected} onOpenChange={(o) => !o && setSelectedId(null)}>
         <SheetContent className="w-[480px] sm:max-w-md overflow-y-auto">
           {selected && (
             <>
@@ -166,6 +194,7 @@ export default function RefundRequests() {
                 <div className="space-y-2 rounded-md border border-slate-200 p-3">
                   <Row label="Order" value={<span className="font-mono">{shortId(selected.orderId, "#")}</span>} />
                   <Row label="Amount" value={formatVND(selected.amount)} />
+                  {selected.provider && <Row label="Provider" value={<StatusBadge status={selected.provider} />} />}
                   <Row label="Reason" value={selected.reason} />
                   {selected.details && <Row label="Details" value={selected.details} />}
                   <Row label="Status" value={<StatusBadge status={selected.status} />} />
@@ -173,9 +202,9 @@ export default function RefundRequests() {
                   <Row label="Last updated" value={formatDate(selected.updatedAt)} />
                 </div>
 
-                {selected.status === "refunded" && (
+                {selected.status === "succeeded" && (
                   <div className="space-y-2 rounded-md border border-emerald-200 bg-emerald-50 p-3">
-                    <Row label="Refund ID" value={<span className="font-mono">{selected.refundTxnRef ?? "—"}</span>} />
+                    <Row label="Provider refund ID" value={<span className="font-mono">{selected.refundTxnRef ?? "—"}</span>} />
                     <Row label="Refunded at" value={selected.refundedAt ? formatDate(selected.refundedAt) : "—"} />
                     <Row label="Amount refunded" value={formatVND(selected.amount)} />
                   </div>
@@ -192,7 +221,7 @@ export default function RefundRequests() {
 
                 {selected.status === "provider_failed" && (
                   <div className="rounded-md border border-orange-200 bg-orange-50 p-3 text-orange-800">
-                    <div className="font-medium">The refund could not be completed by the payment provider.</div>
+                    <div className="font-medium">The payment provider could not complete this refund.</div>
                     {selected.providerMessage && <div className="mt-1 text-xs">{selected.providerMessage}</div>}
                     <div className="mt-2 text-sm">Please contact support.</div>
                   </div>
@@ -202,13 +231,10 @@ export default function RefundRequests() {
                   <Button
                     variant="outline"
                     className="w-full text-rose-600 hover:text-rose-700"
-                    onClick={() => {
-                      cancelRefundRequest(selected.id);
-                      toast.success("Refund request cancelled.");
-                      setSelected(null);
-                    }}
+                    disabled={cancellingId === selected.id}
+                    onClick={() => void cancel(selected.id, true)}
                   >
-                    Cancel request
+                    {cancellingId === selected.id ? "Cancelling..." : "Cancel request"}
                   </Button>
                 )}
               </div>
@@ -224,14 +250,18 @@ function StatusMessage({ status }: { status: RefundRequest["status"] }) {
   if (status === "pending_review")
     return <Banner tone="amber" icon={<Clock className="h-4 w-4" />} text="Your refund request is waiting for review." />;
   if (status === "approved_processing")
-    return <Banner tone="blue" icon={<Clock className="h-4 w-4" />} text="Your refund was approved and is being processed." />;
-  if (status === "refunded")
+    return <Banner tone="blue" icon={<Clock className="h-4 w-4" />} text="Your refund was approved and is being processed by the payment provider." />;
+  if (status === "provider_pending")
+    return <Banner tone="amber" icon={<Clock className="h-4 w-4" />} text="The payment provider is still processing your refund." />;
+  if (status === "succeeded")
     return <Banner tone="emerald" icon={<CheckCircle2 className="h-4 w-4" />} text="Refund completed successfully." />;
   if (status === "rejected")
     return <Banner tone="rose" icon={<XCircle className="h-4 w-4" />} text="Your refund request was rejected." />;
   if (status === "provider_failed")
-    return <Banner tone="orange" icon={<AlertTriangle className="h-4 w-4" />} text="The refund could not be completed by the payment provider." />;
-  return <Banner tone="slate" icon={<XCircle className="h-4 w-4" />} text="This refund request was cancelled." />;
+    return <Banner tone="orange" icon={<AlertTriangle className="h-4 w-4" />} text="The payment provider could not complete this refund." />;
+  if (status === "cancelled")
+    return <Banner tone="slate" icon={<XCircle className="h-4 w-4" />} text="This refund request was cancelled." />;
+  return <Banner tone="slate" icon={<AlertTriangle className="h-4 w-4" />} text="This refund request has an unknown status." />;
 }
 
 function Banner({ tone, icon, text }: { tone: "amber" | "blue" | "emerald" | "rose" | "orange" | "slate"; icon: React.ReactNode; text: string }) {
