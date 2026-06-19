@@ -23,6 +23,7 @@ import {
   type MockRefundOutcome,
   type PaymentIntentResult,
   type PublicConfig,
+  type ReceiptVerificationResult,
 } from "../services";
 import { mapAuditLog, mapOrder, mapProvider, mapTransaction } from "../utils/statusMapper";
 
@@ -64,8 +65,8 @@ interface AppState {
   createOrderFromCart: (shippingAddress: string) => Promise<Order>;
 
   payForOrder: (orderId: string, provider: "stripe" | "mock_bank", paymentToken: string) => Promise<PaymentIntentResult>;
-  syncPayment: (paymentIntentId: string) => Promise<Record<string, any>>;
-  verifyReceiptForTransaction: (transactionId: string) => Promise<{ valid: boolean; payload?: Record<string, unknown>; error?: string }>;
+  syncPayment: (providerPaymentId: string) => Promise<Record<string, any>>;
+  verifyReceiptForTransaction: (transactionId: string) => Promise<ReceiptVerificationResult>;
   refundTransaction: (transactionId: string, reason: string) => Promise<Record<string, any>>;
 
   submitRefundRequest: (input: { orderId: string; reason: string; details?: string }) => Promise<RefundRequest>;
@@ -86,17 +87,22 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : "Unexpected API error.";
 }
 
-function receiptFromTransaction(raw: Record<string, any>): Receipt | null {
-  if (!raw.jws_receipt) return null;
+function receiptFromTransaction(raw: Record<string, any>, transaction: Transaction): Receipt | null {
+  const rawJws = raw.jws_receipt ?? raw.jwsReceipt ?? raw.receipt;
+  if (typeof rawJws !== "string" || !rawJws) return null;
   return {
-    id: raw.id,
-    transactionId: raw.id,
-    orderId: raw.order_id,
-    amount: Number(raw.amount ?? 0),
-    currency: String(raw.currency ?? "VND").toUpperCase(),
-    issuedAt: raw.created_at,
+    id: raw.receipt_id ?? raw.receiptId ?? raw.id,
+    transactionId: transaction.id,
+    orderId: transaction.orderId,
+    amount: transaction.amount,
+    currency: transaction.currency,
+    payer: transaction.payer,
+    merchant: transaction.merchant,
+    provider: transaction.provider,
+    providerPaymentId: transaction.providerReference,
+    issuedAt: raw.created_at ?? raw.createdAt ?? transaction.createdAt,
     status: "issued",
-    rawJws: raw.jws_receipt,
+    rawJws,
   };
 }
 
@@ -148,7 +154,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
       const nextTransactions = rawTransactions.map((transaction) => mapTransaction(transaction, user));
       setTransactions(nextTransactions);
       setOrders(linkTransactions(rawOrders.map((order) => mapOrder(order, user)), nextTransactions));
-      setReceipts(rawTransactions.map(receiptFromTransaction).filter((receipt): receipt is Receipt => !!receipt));
+      setReceipts(rawTransactions
+        .map((transaction, index) => receiptFromTransaction(transaction, nextTransactions[index]))
+        .filter((receipt): receipt is Receipt => !!receipt));
 
       if (user?.role === "admin") {
         const logs = await adminService.listAuditLogs();
@@ -237,21 +245,16 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const clearCart = useCallback(() => setCart([]), []);
 
   const createOrderFromCart = useCallback(async (shippingAddress: string) => {
-    const items = cart.map((item) => {
-      const product = products.find((candidate) => candidate.id === item.productId);
-      if (!product) throw new Error("A product in your cart is no longer available.");
-      return { productId: product.id, productName: product.name, quantity: item.quantity, unitPrice: product.price };
-    });
+    const items = cart.map((item) => ({ productId: item.productId, quantity: item.quantity }));
     const raw = await orderService.createOrder({
       items,
       shippingAddress,
-      totalAmount: items.reduce((sum, item) => sum + item.unitPrice * item.quantity, 0),
     });
     const order = mapOrder(raw, user);
     setOrders((current) => [order, ...current]);
     clearCart();
     return order;
-  }, [cart, clearCart, products, user]);
+  }, [cart, clearCart, user]);
 
   const loadOrder = useCallback(async (orderId: string) => {
     const raw = await orderService.getById(orderId);
@@ -266,16 +269,15 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }, [user]);
 
   const payForOrder = useCallback(async (orderId: string, provider: "stripe" | "mock_bank", paymentToken: string) => {
-    const order = orders.find((candidate) => candidate.id === orderId) ?? await loadOrder(orderId);
     try {
-      return await paymentService.createIntent({ orderId, provider, paymentToken, amount: order.amount });
+      return await paymentService.createIntent({ orderId, provider, paymentToken });
     } finally {
       await refreshData();
     }
-  }, [loadOrder, orders, refreshData]);
+  }, [refreshData]);
 
-  const syncPayment = useCallback(async (paymentIntentId: string) => {
-    const result = await paymentService.sync(paymentIntentId);
+  const syncPayment = useCallback(async (providerPaymentId: string) => {
+    const result = await paymentService.sync(providerPaymentId);
     await refreshData();
     return result;
   }, [refreshData]);
@@ -286,7 +288,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const refundTransaction = useCallback(async (transactionId: string, reason: string) => {
-    const result = await refundService.refundTransaction(transactionId, reason);
+    const result = await refundService.refundTransaction({ transactionId, reason });
     await refreshData();
     return result;
   }, [refreshData]);

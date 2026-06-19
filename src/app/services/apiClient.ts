@@ -15,6 +15,23 @@ export class ApiError extends Error {
 }
 
 type RequestOptions = Omit<RequestInit, "body"> & { body?: unknown };
+type ApiErrorPayload = {
+  error?: unknown;
+  message?: unknown;
+  error_message?: unknown;
+  details?: unknown;
+  errors?: unknown;
+};
+
+function errorPayload(value: unknown): ApiErrorPayload {
+  return value && typeof value === "object" ? value as ApiErrorPayload : {};
+}
+
+function errorMessage(value: unknown): string {
+  const payload = errorPayload(value);
+  const message = payload.error ?? payload.message ?? payload.error_message;
+  return typeof message === "string" && message ? message : "API request failed.";
+}
 
 function clearStoredSession() {
   localStorage.removeItem(TOKEN_KEY);
@@ -44,7 +61,7 @@ async function request<T>(path: string, options: RequestOptions = {}): Promise<T
   }
 
   const text = await response.text();
-  let payload: any = {};
+  let payload: unknown = {};
   if (text) {
     try {
       payload = JSON.parse(text);
@@ -61,7 +78,8 @@ async function request<T>(path: string, options: RequestOptions = {}): Promise<T
     if (response.status === 403 && window.location.pathname !== "/forbidden") {
       window.location.assign("/forbidden");
     }
-    throw new ApiError(response.status, payload.error ?? payload.message ?? "API request failed.", payload.details);
+    const apiError = errorPayload(payload);
+    throw new ApiError(response.status, errorMessage(payload), apiError.details ?? apiError.errors);
   }
 
   return payload as T;

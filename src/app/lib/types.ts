@@ -29,14 +29,22 @@ export interface OrderItem {
   quantity: number;
 }
 
+export interface PaymentParty {
+  id?: string;
+  email?: string;
+  name?: string;
+}
+
 export interface Order {
   id: string;
   customerEmail: string;
   customerName: string;
   items: OrderItem[];
   amount: number;
+  currency: string;
   status: OrderStatus;
   provider?: PaymentProvider;
+  merchant?: PaymentParty;
   shippingAddress: string;
   createdAt: string;
   updatedAt: string;
@@ -51,8 +59,11 @@ export interface Transaction {
   provider: PaymentProvider;
   providerReference: string;
   amount: number;
+  currency: string;
   status: TransactionStatus;
   refundStatus: RefundStatus;
+  payer?: PaymentParty;
+  merchant?: PaymentParty;
   createdAt: string;
   receiptId?: string;
   refundedAt?: string;
@@ -65,6 +76,10 @@ export interface Receipt {
   orderId: string;
   amount: number;
   currency: string;
+  payer?: PaymentParty;
+  merchant?: PaymentParty;
+  provider?: PaymentProvider;
+  providerPaymentId?: string;
   issuedAt: string;
   status: "issued" | "verified" | "invalid";
   rawJws: string;

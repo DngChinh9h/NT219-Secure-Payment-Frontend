@@ -14,7 +14,6 @@ const API_BASE_URL = (process.env.VITE_API_BASE_URL ?? "").replace(/\/+$/, "");
 const ADMIN_EMAIL = process.env.E2E_ADMIN_EMAIL ?? "";
 const ADMIN_PASSWORD = process.env.E2E_ADMIN_PASSWORD ?? "";
 const CUSTOMER_PASSWORD = "CustomerPassword123!";
-const ORDER_TOTAL = 50_000;
 
 const FORBIDDEN_TEXT = [
   "API is not connected yet",
@@ -122,18 +121,12 @@ async function loginApi(email: string, password: string): Promise<Session> {
   };
 }
 
-async function createOrder(label: string, token = customer.token) {
+async function createOrder(_label: string, token = customer.token) {
   const { body } = await requestApi<{ order: Record<string, any> }>("POST", "/api/orders", {
     token,
     body: {
-      items: [{
-        productId: "550e8400-e29b-41d4-a716-446655440000",
-        productName: `Production regression ${label}`,
-        quantity: 1,
-        unitPrice: ORDER_TOTAL,
-      }],
+      items: [{ productId: "550e8400-e29b-41d4-a716-446655440000", quantity: 1 }],
       shippingAddress: "Production Regression Address",
-      totalAmount: ORDER_TOTAL,
     },
     expectedStatus: 201,
   });
@@ -148,9 +141,9 @@ async function payOrder(orderId: string, provider: "mock_bank" | "stripe", payme
       orderId,
       provider,
       paymentToken,
-      amount: ORDER_TOTAL,
       nonce: randomUUID(),
       timestamp: serverTimestamp,
+      idempotencyKey: randomUUID(),
     },
   });
 }
@@ -165,8 +158,9 @@ async function createMockPaidOrder(label: string) {
 async function createStripePaidOrder(label: string) {
   const order = await createOrder(label);
   const payment = await payOrder(order.id, "stripe", "pm_card_visa");
-  expect(payment.body.paymentIntentId).toMatch(/^pi_/);
-  const sync = await requestApi("POST", `/api/payments/sync/${encodeURIComponent(payment.body.paymentIntentId)}`, {
+  const providerPaymentId = payment.body.provider_payment_id ?? payment.body.providerPaymentId ?? payment.body.paymentIntentId;
+  expect(providerPaymentId).toMatch(/^pi_/);
+  const sync = await requestApi("POST", `/api/payments/sync/${encodeURIComponent(providerPaymentId)}`, {
     token: customer.token,
   });
   expect(sync.body.providerStatus).toBe("succeeded");
@@ -382,6 +376,12 @@ test.describe("SecurePay Gateway production regression", () => {
     const created = await response;
     const rawBody = await created.text();
     expect(created.status(), `Request URL: ${created.url()}\nStatus code: ${created.status()}\nResponse body: ${rawBody}`).toBe(201);
+    const requestBody = created.request().postDataJSON();
+    expect(requestBody).toEqual(expect.objectContaining({
+      items: [{ productId: expect.any(String), quantity: expect.any(Number) }],
+      shippingAddress: "Production Regression Address",
+    }));
+    expect(requestBody).not.toHaveProperty("totalAmount");
     await expect(page).toHaveURL(/\/checkout\//);
     await testInfo.attach("created-order-response.json", { body: rawBody, contentType: "application/json" });
   });
@@ -410,7 +410,8 @@ test.describe("SecurePay Gateway production regression", () => {
     await cardFrame.locator('input[name="cardnumber"]').fill("4242424242424242");
     await cardFrame.locator('input[name="exp-date"]').fill("1230");
     await cardFrame.locator('input[name="cvc"]').fill("123");
-    const payButton = page.getByRole("button", { name: `Pay ${new Intl.NumberFormat("vi-VN", { style: "currency", currency: "VND", maximumFractionDigits: 0 }).format(ORDER_TOTAL)} securely` });
+    const total = Number(order.total_amount ?? order.totalAmount);
+    const payButton = page.getByRole("button", { name: `Pay ${new Intl.NumberFormat("vi-VN", { style: "currency", currency: "VND", maximumFractionDigits: 0 }).format(total)} securely` });
     await expect(payButton).toBeEnabled();
     const intentResponse = page.waitForResponse((candidate) =>
       candidate.request().method() === "POST" && candidate.url().endsWith("/api/payments/create-intent"),

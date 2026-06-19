@@ -82,6 +82,8 @@ export interface RiskEvidence {
 export interface AdminOrder {
   id: string;
   customerEmail: string;
+  merchantId?: string;
+  merchantName?: string;
   amount: number;
   status: string;
   provider?: string;
@@ -95,6 +97,8 @@ export interface AdminTransaction {
   id: string;
   orderId: string;
   customerEmail: string;
+  merchantId?: string;
+  merchantName?: string;
   provider?: string;
   providerPaymentId?: string;
   amount: number;
@@ -368,6 +372,8 @@ export const adminService = {
     return result.items.map((item) => ({
       id: item.id,
       customerEmail: item.customerEmail ?? item.customer_email ?? "",
+      merchantId: item.merchantId ?? item.merchant_id ?? undefined,
+      merchantName: item.merchantName ?? item.merchant_name ?? undefined,
       amount: Number(item.totalAmount ?? item.total_amount ?? item.amount ?? 0),
       status: String(item.status ?? "unknown"),
       provider: item.provider ? String(item.provider) : undefined,
@@ -383,6 +389,8 @@ export const adminService = {
       id: item.id,
       orderId: item.orderId ?? item.order_id,
       customerEmail: item.customerEmail ?? item.customer_email ?? "",
+      merchantId: item.merchantId ?? item.merchant_id ?? undefined,
+      merchantName: item.merchantName ?? item.merchant_name ?? undefined,
       provider: item.provider ? String(item.provider) : undefined,
       providerPaymentId: item.providerPaymentId ?? item.provider_payment_id ?? undefined,
       amount: Number(item.amount ?? 0),

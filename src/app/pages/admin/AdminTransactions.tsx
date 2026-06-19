@@ -39,13 +39,14 @@ export default function AdminTransactions() {
       <Card className="border-slate-200">
         <CardContent className="p-0">
           <Table data-testid="admin-transactions-table">
-            <TableHeader><TableRow><TableHead>Transaction</TableHead><TableHead>Order</TableHead><TableHead>Customer</TableHead><TableHead>Provider</TableHead><TableHead>Provider reference</TableHead><TableHead>Amount</TableHead><TableHead>Status</TableHead><TableHead>Refund</TableHead><TableHead>Created</TableHead></TableRow></TableHeader>
+            <TableHeader><TableRow><TableHead>Transaction</TableHead><TableHead>Order</TableHead><TableHead>Payer / Customer</TableHead><TableHead>Merchant / Payee</TableHead><TableHead>Provider</TableHead><TableHead>Provider reference</TableHead><TableHead>Amount</TableHead><TableHead>Status</TableHead><TableHead>Refund</TableHead><TableHead>Created</TableHead></TableRow></TableHeader>
             <TableBody>
               {transactions.map((transaction) => (
                 <TableRow key={transaction.id}>
                   <TableCell className="font-mono text-xs">{shortId(transaction.id, "#")}</TableCell>
                   <TableCell className="font-mono text-xs">{shortId(transaction.orderId, "#")}</TableCell>
                   <TableCell>{transaction.customerEmail}</TableCell>
+                  <TableCell>{transaction.merchantName ?? transaction.merchantId ?? "â€”"}</TableCell>
                   <TableCell>{transaction.provider ? <StatusBadge status={transaction.provider} /> : "—"}</TableCell>
                   <TableCell className="font-mono text-xs">{transaction.providerPaymentId ?? "—"}</TableCell>
                   <TableCell>{formatVND(transaction.amount)}</TableCell>
@@ -54,7 +55,7 @@ export default function AdminTransactions() {
                   <TableCell>{formatDate(transaction.createdAt)}</TableCell>
                 </TableRow>
               ))}
-              {transactions.length === 0 && <TableRow><TableCell colSpan={9} className="py-10 text-center text-sm text-slate-500">{loading ? "Loading admin transactions..." : "No transactions returned by the API."}</TableCell></TableRow>}
+              {transactions.length === 0 && <TableRow><TableCell colSpan={10} className="py-10 text-center text-sm text-slate-500">{loading ? "Loading admin transactions..." : "No transactions returned by the API."}</TableCell></TableRow>}
             </TableBody>
           </Table>
         </CardContent>

@@ -10,15 +10,15 @@ import { toast } from "sonner";
 
 export default function AdminPayments() {
   const { syncPayment } = useApp();
-  const [paymentIntentId, setPaymentIntentId] = useState("");
+  const [providerPaymentId, setProviderPaymentId] = useState("");
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<Record<string, any> | null>(null);
 
   const sync = async () => {
-    if (!paymentIntentId.trim()) return;
+    if (!providerPaymentId.trim()) return;
     setBusy(true);
     try {
-      const next = await syncPayment(paymentIntentId.trim());
+      const next = await syncPayment(providerPaymentId.trim());
       setResult(next);
       toast.success("Payment state synced with provider.");
     } catch (error) {
@@ -30,21 +30,21 @@ export default function AdminPayments() {
 
   return (
     <div className="space-y-5">
-      <div><h1 className="text-2xl font-semibold tracking-tight">Payments</h1><p className="text-sm text-slate-500">This page is for manual provider sync by payment intent ID.</p></div>
+      <div><h1 className="text-2xl font-semibold tracking-tight">Payments</h1><p className="text-sm text-slate-500">This page is for manual provider sync by provider payment ID.</p></div>
       <Card className="border-slate-200">
         <CardHeader><CardTitle className="text-base">Provider sync</CardTitle></CardHeader>
         <CardContent className="space-y-3">
-          <Label htmlFor="payment-intent">Payment intent ID</Label>
-          <div className="flex gap-2"><Input id="payment-intent" value={paymentIntentId} onChange={(event) => setPaymentIntentId(event.target.value)} placeholder="pi_... or mock_pi_..." /><Button disabled={busy || !paymentIntentId.trim()} onClick={sync}><RefreshCw className="mr-2 h-4 w-4" />{busy ? "Syncing..." : "Sync"}</Button></div>
+          <Label htmlFor="provider-payment-id">Provider payment ID</Label>
+          <div className="flex gap-2"><Input id="provider-payment-id" value={providerPaymentId} onChange={(event) => setProviderPaymentId(event.target.value)} placeholder="pi_... or mock_pi_..." /><Button disabled={busy || !providerPaymentId.trim()} onClick={sync}><RefreshCw className="mr-2 h-4 w-4" />{busy ? "Syncing..." : "Sync"}</Button></div>
           <div className="text-xs text-slate-500">The backend enforces ownership for customers and permits administrative sync for operators.</div>
         </CardContent>
       </Card>
       {result && (
         <Card className="border-emerald-200 bg-emerald-50/50"><CardHeader><CardTitle className="text-base">Sync result</CardTitle></CardHeader><CardContent className="grid gap-2 text-sm sm:grid-cols-2">
           <Row label="Provider" value={<StatusBadge status={String(result.provider)} />} />
-          <Row label="Provider status" value={<StatusBadge status={String(result.providerStatus)} />} />
-          <Row label="Order status" value={<StatusBadge status={String(result.orderStatus)} />} />
-          <Row label="Payment reference" value={<span className="font-mono text-xs">{String(result.paymentIntentId)}</span>} />
+          <Row label="Provider status" value={<StatusBadge status={String(result.providerStatus ?? result.provider_status)} />} />
+          <Row label="Order status" value={<StatusBadge status={String(result.orderStatus ?? result.order_status)} />} />
+          <Row label="Provider payment ID" value={<span className="font-mono text-xs">{String(result.providerPaymentId ?? result.provider_payment_id ?? result.paymentIntentId ?? "â€”")}</span>} />
         </CardContent></Card>
       )}
     </div>

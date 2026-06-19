@@ -3,6 +3,14 @@ import type { PaymentProvider, RefundRequest, RefundRequestStatus } from "../lib
 
 export type MockRefundOutcome = "success" | "pending" | "failed";
 
+export interface RefundTransactionInput {
+  transactionId: string;
+  reason: string;
+  idempotencyKey?: string;
+  amount?: number;
+  mockRefundOutcome?: MockRefundOutcome;
+}
+
 function mapStatus(status?: string): RefundRequestStatus {
   if (status === "refunded") return "succeeded";
   if (
@@ -48,8 +56,14 @@ function mapRefundRequest(raw: Record<string, any>): RefundRequest {
 }
 
 export const refundService = {
-  async refundTransaction(transactionId: string, reason: string) {
-    return apiClient.post<Record<string, any>>("/api/payments/refund", { transactionId, reason });
+  async refundTransaction(input: RefundTransactionInput) {
+    return apiClient.post<Record<string, any>>("/api/payments/refund", {
+      transactionId: input.transactionId,
+      reason: input.reason,
+      idempotencyKey: input.idempotencyKey ?? crypto.randomUUID(),
+      ...(input.amount === undefined ? {} : { amount: input.amount }),
+      ...(input.mockRefundOutcome === undefined ? {} : { mockRefundOutcome: input.mockRefundOutcome }),
+    });
   },
   async createRefundRequest(orderId: string, reason: string, details?: string) {
     const result = await apiClient.post<{ refundRequest: Record<string, any> }>("/api/refund-requests", {

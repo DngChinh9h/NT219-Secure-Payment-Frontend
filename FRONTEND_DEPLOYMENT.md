@@ -32,6 +32,10 @@ GET https://api.example.com/api/config/public
 
 Only public Stripe configuration belongs in that response. Never add Stripe secret keys, webhook secrets, database URLs, JWT private keys, or backend-only credentials to frontend environment variables.
 
+## Payment API Contract
+
+`VITE_API_BASE_URL` must point to the backend origin, without an `/api` suffix. The frontend sends only product IDs and quantities when creating an order; the backend returns the authoritative `total_amount`. Payment intent requests include an order ID, provider token, nonce, timestamp, and idempotency key, but never a client-authoritative amount. Direct admin refunds include a transaction ID, reason, idempotency key, and optionally an amount.
+
 ## Backend CORS
 
 The backend running behind the ALB must allow the deployed Vercel origin:

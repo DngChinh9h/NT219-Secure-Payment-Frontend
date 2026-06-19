@@ -8,6 +8,8 @@ Set this variable:
 VITE_API_BASE_URL=https://api.example.com
 ```
 
+Use the backend origin only (without `/api`). The deployed API must implement the server-priced order, idempotent payment, and idempotent admin-refund contract; no product prices, order totals, or payment amounts are configured in Vercel.
+
 Keep:
 
 ```text

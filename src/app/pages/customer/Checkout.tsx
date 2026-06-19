@@ -121,7 +121,7 @@ export default function CheckoutPage() {
                         <StripeCardCheckout
                           disabled={!!result}
                           orderId={order.id}
-                          amount={order.amount}
+                          serverTotal={order.amount}
                           onResult={showResult}
                         />
                       </Elements>
@@ -180,9 +180,10 @@ export default function CheckoutPage() {
               <CardContent className="space-y-3">
                 <div className={`flex items-start gap-3 rounded-lg border p-4 ${result.status === "succeeded" ? "border-emerald-200 bg-emerald-50" : result.status === "failed" ? "border-rose-200 bg-rose-50" : "border-amber-200 bg-amber-50"}`}>
                   {result.status === "succeeded" ? <CheckCircle2 className="mt-0.5 h-5 w-5 text-emerald-600" /> : <AlertCircle className="mt-0.5 h-5 w-5 text-amber-600" />}
-                  <div className="text-sm">
-                    <div className="font-medium">{result.status === "succeeded" ? "Payment completed" : result.status === "failed" ? "Payment failed. You were not charged." : "Payment is processing"}</div>
-                    <div className="text-slate-600">Provider reference: <span className="font-mono">{result.providerPaymentId}</span></div>
+                    <div className="text-sm">
+                      <div className="font-medium">{result.status === "succeeded" ? "Payment completed" : result.status === "failed" ? "Payment failed. You were not charged." : "Payment is processing"}</div>
+                    <div className="text-slate-600">Payment attempt: <span className="font-mono">{result.paymentAttemptId || "â€”"}</span></div>
+                    <div className="text-slate-600">Provider payment ID: <span className="font-mono">{result.providerPaymentId || "â€”"}</span></div>
                   </div>
                 </div>
                 <Button variant="outline" className="w-full" onClick={() => navigate("/orders")}>View my orders</Button>
@@ -215,12 +216,12 @@ export default function CheckoutPage() {
 }
 
 function StripeCardCheckout({
-  amount,
+  serverTotal,
   disabled,
   onResult,
   orderId,
 }: {
-  amount: number;
+  serverTotal: number;
   disabled: boolean;
   onResult: (result: PaymentIntentResult) => void;
   orderId: string;
@@ -258,7 +259,7 @@ function StripeCardCheckout({
         status = confirmation.paymentIntent?.status ?? status;
       }
 
-      const synced = await syncPayment(created.paymentIntentId);
+      const synced = await syncPayment(created.providerPaymentId || created.paymentIntentId);
       onResult({
         ...created,
         status: String(synced.providerStatus ?? status),
@@ -299,7 +300,7 @@ function StripeCardCheckout({
       </div>
       {cardError && <div className="mt-3 text-xs text-rose-700">{cardError}</div>}
       <Button disabled={busy || disabled || !stripe || !elements || !cardComplete} className="mt-6 w-full bg-indigo-600 hover:bg-indigo-700" onClick={() => void pay()}>
-        {busy ? "Processing..." : `Pay ${formatVND(amount)} securely`}
+        {busy ? "Processing..." : `Pay ${formatVND(serverTotal)} securely`}
       </Button>
       <PaymentSourceOfTruth />
     </>

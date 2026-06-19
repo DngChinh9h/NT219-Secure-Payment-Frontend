@@ -39,12 +39,13 @@ export default function AdminOrders() {
       <Card className="border-slate-200">
         <CardContent className="p-0">
           <Table data-testid="admin-orders-table">
-            <TableHeader><TableRow><TableHead>Order</TableHead><TableHead>Customer</TableHead><TableHead>Amount</TableHead><TableHead>Status</TableHead><TableHead>Provider</TableHead><TableHead>Transactions</TableHead><TableHead>Refund</TableHead><TableHead>Updated</TableHead></TableRow></TableHeader>
+            <TableHeader><TableRow><TableHead>Order</TableHead><TableHead>Customer</TableHead><TableHead>Merchant / Payee</TableHead><TableHead>Amount</TableHead><TableHead>Status</TableHead><TableHead>Provider</TableHead><TableHead>Transactions</TableHead><TableHead>Refund</TableHead><TableHead>Updated</TableHead></TableRow></TableHeader>
             <TableBody>
               {orders.map((order) => (
                 <TableRow key={order.id}>
                   <TableCell className="font-mono text-xs">{shortId(order.id, "#")}</TableCell>
                   <TableCell>{order.customerEmail}</TableCell>
+                  <TableCell>{order.merchantName ?? order.merchantId ?? "â€”"}</TableCell>
                   <TableCell>{formatVND(order.amount)}</TableCell>
                   <TableCell><StatusBadge status={order.status} /></TableCell>
                   <TableCell>{order.provider ? <StatusBadge status={order.provider} /> : "—"}</TableCell>
@@ -53,7 +54,7 @@ export default function AdminOrders() {
                   <TableCell>{formatDate(order.updatedAt)}</TableCell>
                 </TableRow>
               ))}
-              {orders.length === 0 && <TableRow><TableCell colSpan={8} className="py-10 text-center text-sm text-slate-500">{loading ? "Loading admin orders..." : "No orders returned by the API."}</TableCell></TableRow>}
+              {orders.length === 0 && <TableRow><TableCell colSpan={9} className="py-10 text-center text-sm text-slate-500">{loading ? "Loading admin orders..." : "No orders returned by the API."}</TableCell></TableRow>}
             </TableBody>
           </Table>
         </CardContent>

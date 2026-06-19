@@ -11,7 +11,7 @@ import { formatDate, formatVND, shortId } from "../../lib/format";
 import { useNavigate } from "react-router";
 import { toast } from "sonner";
 import { ShieldCheck, ShieldAlert, ShieldQuestion } from "lucide-react";
-import type { Order } from "../../lib/types";
+import type { Order, PaymentParty } from "../../lib/types";
 
 const FILTERS = [
   { v: "all", label: "All" },
@@ -153,6 +153,9 @@ export default function MyOrders() {
                     <div className="mb-1 text-xs font-medium uppercase tracking-wider text-slate-500">Shipping address</div>
                     <div className="text-slate-700">{selected.shippingAddress}</div>
                   </div>
+                  {selected.merchant && (
+                    <Row label="Merchant / payee" value={partyLabel(selected.merchant)} />
+                  )}
                   <div className="flex justify-between border-t border-slate-100 pt-3 text-base font-semibold">
                     <span>Total</span><span className="text-indigo-700">{formatVND(selected.amount)}</span>
                   </div>
@@ -188,6 +191,8 @@ export default function MyOrders() {
                       <Row label="Payment provider" value={<StatusBadge status={txn.provider} />} />
                       <Row label="Payment amount" value={formatVND(txn.amount)} />
                       <Row label="Payment status" value={<StatusBadge status={txn.status} />} />
+                      {txn.payer && <Row label="Payer / customer" value={partyLabel(txn.payer)} />}
+                      {txn.merchant && <Row label="Merchant / payee" value={partyLabel(txn.merchant)} />}
                       <Row label="Provider reference" value={<span className="font-mono text-xs">{txn.providerReference}</span>} />
                       <Row label="Created" value={formatDate(txn.createdAt)} />
                     </div>
@@ -204,6 +209,9 @@ export default function MyOrders() {
                       <Row label="Status" value={<span className="font-medium text-emerald-700">Available</span>} />
                       <Row label="Issued" value={formatDate(receipt.issuedAt)} />
                       <Row label="Amount" value={`${formatVND(receipt.amount)} ${receipt.currency}`} />
+                      {receipt.payer && <Row label="Payer / customer" value={partyLabel(receipt.payer)} />}
+                      {receipt.merchant && <Row label="Merchant / payee" value={partyLabel(receipt.merchant)} />}
+                      {receipt.providerPaymentId && <Row label="Provider payment ID" value={<span className="font-mono text-xs">{receipt.providerPaymentId}</span>} />}
                       <div className="flex flex-wrap gap-2 pt-1">
                         <Button size="sm" className="bg-indigo-600 hover:bg-indigo-700"
                           onClick={() => {
@@ -290,4 +298,9 @@ function Row({ label, value }: { label: string; value: React.ReactNode }) {
       <span className="text-right">{value}</span>
     </div>
   );
+}
+
+function partyLabel(party: PaymentParty): React.ReactNode {
+  const label = party.email ?? party.name ?? party.id;
+  return label ? <span className={party.id && !party.email && !party.name ? "font-mono text-xs" : undefined}>{label}</span> : "â€”";
 }
